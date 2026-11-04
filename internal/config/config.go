@@ -21,6 +21,12 @@ const DefaultDataDir = "/var/lib/tramline"
 const MaxTramSoakSeconds = 1200
 
 type Config struct {
+	// ListenInterfaces is the network interfaces to serve on, such as eth0 and
+	// tailscale0, all on Port. Their addresses are looked up and followed, so none
+	// is written down here, and one that doesn't exist yet doesn't stop the server.
+	ListenInterfaces []string `json:"listen_interfaces"`
+	Port             int      `json:"port"`
+	// Listen is one fixed address and port, instead of those two, as the simulator uses.
 	Listen  string `json:"listen"`
 	DataDir string `json:"data_dir"`
 	Serial  Serial `json:"serial"`
@@ -67,7 +73,31 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-func (c *Config) validate() error {
+// validateListen requires each place to serve on to be named, so the server can't end up
+// on a Docker bridge or a new interface by accident.
+func (c *Config) validateListen() error {
+	if c.Listen == "" {
+		if len(c.ListenInterfaces) == 0 {
+			return errors.New("listen_interfaces and port are required")
+		}
+		if c.Port < 1 || c.Port > 65535 {
+			return fmt.Errorf("port must be 1 to 65535, got %d", c.Port)
+		}
+		seen := map[string]bool{}
+		for _, name := range c.ListenInterfaces {
+			if name == "" {
+				return errors.New("listen_interfaces: a name can't be empty")
+			}
+			if seen[name] {
+				return fmt.Errorf("listen_interfaces: %s is listed twice", name)
+			}
+			seen[name] = true
+		}
+		return nil
+	}
+	if len(c.ListenInterfaces) != 0 || c.Port != 0 {
+		return errors.New("listen can't be used with listen_interfaces or port")
+	}
 	host, _, err := net.SplitHostPort(c.Listen)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
@@ -78,6 +108,13 @@ func (c *Config) validate() error {
 	}
 	if ip.IsUnspecified() {
 		return errors.New("listen: must be one specific address, not all interfaces")
+	}
+	return nil
+}
+
+func (c *Config) validate() error {
+	if err := c.validateListen(); err != nil {
+		return err
 	}
 	if c.TramSoakSeconds < 0 || c.TramSoakSeconds > MaxTramSoakSeconds {
 		return fmt.Errorf("tram_soak_seconds must be 0 to %d, got %d", MaxTramSoakSeconds, c.TramSoakSeconds)

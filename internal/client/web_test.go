@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"tramline/internal/marlin"
+	"tramline/internal/server"
 )
 
 // These run against the real listener, as the port carries both servers.
@@ -35,6 +37,56 @@ func TestWebPageAndAPIShareAPort(t *testing.T) {
 	}
 	if _, err := f.stranger(t).Status(); err == nil {
 		t.Fatal("a stranger got status")
+	}
+}
+
+// Listening on an interface is the same server: the page needs nothing, the API needs
+// its certificate, and plain HTTP can't reach the API.
+func TestInterfaceListenerServesTheSameWay(t *testing.T) {
+	reserve, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := reserve.Addr().(*net.TCPAddr).Port
+	reserve.Close()
+
+	plug := &fakePlug{on: true}
+	lookup := func(string) ([]net.IP, error) { return []net.IP{net.IPv4(127, 0, 0, 2)}, nil }
+	f := serveOn(t, &server.Server{
+		Version: "test",
+		Plug:    plug,
+		Printer: func() marlin.Status { return marlin.Status{Connected: true} },
+	}, server.ListenInterfaces([]string{"fake0"}, port, lookup, 10*time.Millisecond))
+	also := fixture{fmt.Sprintf("https://127.0.0.2:%d", port), f.fingerprint, f.serverDir, f.clientFP, f.cert}
+	hc := &http.Client{Timeout: 5 * time.Second}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := hc.Get(plainURL(also) + "/api/status")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatal(resp.Status)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := also.client(t).Status(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := also.stranger(t).Status(); err == nil {
+		t.Fatal("a stranger got status")
+	}
+	resp, err := hc.Post(plainURL(also)+"/v1/power", "application/json", strings.NewReader(`{"on":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode < 400 || plug.switches != 0 {
+		t.Fatalf("%s, %d switches", resp.Status, plug.switches)
 	}
 }
 

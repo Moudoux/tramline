@@ -20,6 +20,7 @@ The record of Tramline's design, firmware findings, test results and open issues
 | Tram before every print, `print --continue`, LCD messages, `tram_soak_seconds` | Done. The pass path and LCD messages have run on the real printer. A failed check, `--continue` and a soak above 0 are simulator only |
 | Printing by streaming | Done 2026-11-04. Passed on the real printer: to the end, a long print of 182,184 lines, cancel cold and hot, the LCD's Stop, `M85` firing, a restart. A real resend, a lost link and `estop` during a stream are simulator only, as none has happened on the printer. The LCD's Pause isn't supported. See Streaming design |
 | Read-only web page, `tramline web` | Built and installed 2026-11-04. The user has tried it on the simulator and on a phone. It hasn't yet been watched during a real print. See Web page |
+| Listening by interface, including Tailscale, `listen_interfaces` | Built and installed 2026-11-04. On the Pi it listens on `eth0` and on `tailscale0`, IPv4 and IPv6, and the page answers on those addresses from the Pi itself, but not on `eth0.2` or `docker0`. The user confirmed it works over Tailscale from a phone on 5G. An address changing has only run in tests. See Listening by interface |
 | `tramline update` | Not started |
 
 ## Next session
@@ -28,7 +29,7 @@ The record of Tramline's design, firmware findings, test results and open issues
 
 **Next:** the web page is installed, see Web page, and needs watching during a real print. What's worth checking there is listed under Not proven on the real printer. The skills for SolidCraft, Cura slicing and Tramline were made 2026-11-04, in `../.claude/skills/`, so keep the `tramline` one in step with this README. The small real copy on the rewritten `sendLines` passed, see Upload's result under Long print by streaming.
 
-**Installed versus source:** the Pi is `dev-20261104204513`, with the web page and the simulator's options. `dist/` is `dev-20261104205612`, which only changes what the client's `tramline web` prints, so the Pi doesn't need it. The user runs `deploy/install.sh raspberrypi` to install a new build.
+**Installed versus source:** the Pi and `dist/` are both `dev-20261104213525`, which adds listening by interface, with `"listen_interfaces": ["eth0", "tailscale0"], "port": 8726` in `/etc/tramline/config.json`, see Listening by interface. The user runs `deploy/install.sh raspberrypi` to install a new build.
 
 **Print design:** built as approved and tested on the real printer, with its firmware findings and results, under Print design below. Test files are in `test-logs/2026-11-03-print/`: `dry-run.gcode`, about 60 seconds of `G4` and `M118` with no heat or movement, `dry-run-long.gcode`, about 10 minutes of the same, and `test-tile_PETG.gcode`, 15 x 15 x 1 mm, 2 min 45 s printing and about 10 minutes in all from cold.
 
@@ -294,7 +295,7 @@ With SSH gone, Tramline must provide its own access control and encryption. Anyo
 - **Client identity:** `tramline keygen` creates the key on the client, so a private key never has to move between machines. TLS proves the client holds it, and it's never sent.
 - **Allow list:** `tramline allow <fingerprint>` adds a client to `/var/lib/tramline/clients.allow`, which holds only public fingerprints. It's read for every connection and request, so allowing or revoking needs no restart, and revoking also cuts off open connections. A missing or corrupted list denies everyone.
 - **TLS 1.3 only.** Every API endpoint needs an allowed certificate. Plain HTTP on the same port reaches only the read-only web page, which the user asked for on 2026-11-04, see Web page.
-- **Listening address:** LAN only for now, decided by the user. The server listens on `192.168.1.121`, set in the config, and not on `eth0.2`, Tailscale or the Docker bridges. Containers could still route to it, which is why client certificates are required. Adding Tailscale later is a config change.
+- **Listening addresses:** the LAN and Tailscale, decided by the user on 2026-11-04, which replaces LAN only. The server listens on the addresses of each interface in `listen_interfaces`, which are `eth0` and `tailscale0`. It doesn't listen on `eth0.2` or the Docker bridges, and "all interfaces" stays refused. Containers could still route to it, which is why client certificates are required. See Listening by interface.
 - **Limits enforced by the server,** not the client: see Safety rules.
 - **Files:** uploaded names are restricted to a safe character set and length, with a maximum upload size.
 
@@ -314,9 +315,12 @@ With SSH gone, Tramline must provide its own access control and encryption. Anyo
 
 `tram_soak_seconds` is optional: how long a print waits at temperature before its first tram check, 0 to 1200, default 0. It isn't in the example below as the default suits the current thin plate. See Tram before printing.
 
+`listen_interfaces` and `port` say where to serve, see Listening by interface. `listen`, one fixed address and port, can replace them, and is what the simulator uses.
+
 ```json
 {
-  "listen": "192.168.1.121:8726",
+  "listen_interfaces": ["eth0", "tailscale0"],
+  "port": 8726,
   "serial": {
     "device": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
     "baud": 250000
@@ -328,6 +332,19 @@ With SSH gone, Tramline must provide its own access control and encryption. Anyo
   }
 }
 ```
+
+### Listening by interface
+
+Built 2026-11-04, at the user's request, so the Pi can be used from other devices over Tailscale. **Interfaces are named rather than addresses,** as the user didn't want hardcoded addresses: `eth0` gets its address from DHCP, and a Tailscale address normally lasts as long as the Pi stays registered, but can change if it's re-added. The Hue bridge's address is still fixed, in `hue.address`, and `bridge_id` proves it's the right device.
+
+- **How it works:** `InterfaceListener` in `internal/server/interfaces.go` is a `net.Listener` that looks up each interface's addresses every 30 seconds and listens on each on `port`. That covers IPv4 and IPv6, without link-local addresses. It moves to a new address by itself.
+- **One interface can't take another down:** an interface missing at boot, Tailscale being down or a port in use only gets logged and tried again. A failed lookup leaves what's already open alone. A problem is logged when it changes, not on every try.
+- **It never fails to start,** so a mistyped interface name shows up only in the log, as `no such network interface`, with the server running and not reachable there. If `eth0` were misnamed, the LAN wouldn't answer.
+- **`eth0` doesn't cover `eth0.2`,** which is its own interface, as `ip -br addr` shows.
+- **It needs `AF_NETLINK` in the service's `RestrictAddressFamilies`:** Go uses it to look up an interface's addresses. Without it the log says `netlinkrib: address family not supported by protocol`, and nothing can be listened on, so a new config needs the new service file. Checked with `systemd-run --user` on the desktop, both ways.
+- **Same server on every address:** the page has no login, so every device on the tailnet can see it, which the user accepted. The API still needs an allowed client certificate.
+- **The client's URL uses the name:** `tramline login https://raspberrypi:8726 <fingerprint>`, which the user has done. The client checks the server by fingerprint, not by name, so the certificate's IP entry doesn't matter and nothing needs regenerating. `raspberrypi` resolves to the LAN address through the router, and should resolve to the Tailscale one through MagicDNS, which hasn't been tried yet.
+- **Upload limit:** the client's 30-minute limit was sized for a home network, so a big upload over a slow connection could hit it.
 
 - The plug is identified **by UUID, as the user asked**, not by name, so renaming it in the Hue app changes nothing.
 - The UUID is the plug's `light` resource ID in CLIP v2, which is the ID that switching uses. A device also has a separate `device` UUID, so don't mix them up.

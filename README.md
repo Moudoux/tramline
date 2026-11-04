@@ -51,9 +51,9 @@ Run `tramline help` for everything, including the options and the commands used 
 
 ## Web page
 
-`tramline web` opens `http://192.168.1.121:8726/`, which also works on a phone. It shows status, temperatures and progress, with the file drawn in 3D as it prints. With nothing printing, it shows the last job.
+`tramline web` opens the page at `http://raspberrypi:8726/`, which also works on a phone. It shows status, temperatures and progress, with the file drawn in 3D as it prints. With nothing printing, it shows the last job.
 
-- **It's read-only and has no login,** so anyone on the network can see the status and the current file's shape.
+- **It's read-only and has no login,** so anyone on the network or the tailnet can see the status and the current file's shape.
 - **It can't affect a print,** as it never talks to the printer.
 - **The head's position is worked out, not measured.** It comes from how far through the file the print has got, about every second when streaming and every 30 seconds or so from the card.
 
@@ -79,7 +79,7 @@ This runs a print on a simulated printer on this machine, with a throwaway login
 
 ## Security
 
-The API uses mutual TLS: each client has its own key, and the Pi keeps a list of those allowed, by fingerprint. It listens on the LAN only. The web page is the one exception to needing a key, and can't reach the API.
+The API uses mutual TLS: each client has its own key, and the Pi keeps a list of those allowed, by fingerprint. It listens on the LAN and on Tailscale, set by `listen_interfaces` in the Pi's config, and nowhere else. The web page is the one exception to needing a key, and can't reach the API.
 
 ## More detail
 

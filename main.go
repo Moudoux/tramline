@@ -310,11 +310,16 @@ func runServe(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	ln, err := net.Listen("tcp", cfg.Listen)
-	if err != nil {
-		return err
+	var ln net.Listener
+	if cfg.Listen != "" {
+		if ln, err = net.Listen("tcp", cfg.Listen); err != nil {
+			return err
+		}
+		log.Printf("tramline %s listening on https://%s", version, cfg.Listen)
+	} else {
+		log.Printf("tramline %s listening on port %d of %s", version, cfg.Port, strings.Join(cfg.ListenInterfaces, ", "))
+		ln = server.ListenInterfaces(cfg.ListenInterfaces, cfg.Port, server.InterfaceIPs, server.DefaultInterfaceCheck)
 	}
-	log.Printf("tramline %s listening on https://%s", version, cfg.Listen)
 	s = &server.Server{
 		Version:   version,
 		Simulated: *useSim,

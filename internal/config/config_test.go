@@ -61,6 +61,35 @@ func TestLoadAllowsEmptyPlugBeforePairing(t *testing.T) {
 	}
 }
 
+func TestListenInterfaces(t *testing.T) {
+	load := func(listen string) (*Config, error) {
+		return Load(write(t, strings.Replace(good, `"listen": "192.168.1.121:8726"`, listen, 1)))
+	}
+	cfg, err := load(`"listen_interfaces": ["eth0", "tailscale0"], "port": 8726`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ListenInterfaces) != 2 || cfg.ListenInterfaces[1] != "tailscale0" || cfg.Port != 8726 || cfg.Listen != "" {
+		t.Fatalf("got %+v", cfg)
+	}
+	tests := []struct{ listen, want string }{
+		{`"port": 8726`, "required"},
+		{`"listen_interfaces": []`, "required"},
+		{`"listen_interfaces": ["eth0"]`, "port must be"},
+		{`"listen_interfaces": ["eth0"], "port": 70000`, "port must be"},
+		{`"listen_interfaces": [""], "port": 8726`, "can't be empty"},
+		{`"listen_interfaces": ["eth0","eth0"], "port": 8726`, "listed twice"},
+		{`"listen": "192.168.1.121:8726", "port": 8726`, "can't be used with"},
+		{`"listen": "192.168.1.121:8726", "listen_interfaces": ["eth0"]`, "can't be used with"},
+		{`"also_listen_interfaces": ["eth0"], "port": 8726`, "unknown field"},
+	}
+	for _, tt := range tests {
+		if _, err := load(tt.listen); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: got %v, want %q", tt.listen, err, tt.want)
+		}
+	}
+}
+
 func TestTramSoakSeconds(t *testing.T) {
 	base := `{"listen":"192.168.1.121:8726","serial":{"device":"/dev/x","baud":250000}`
 	load := func(extra string) (*Config, error) {

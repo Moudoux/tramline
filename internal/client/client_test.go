@@ -97,6 +97,12 @@ func startWith(t *testing.T, plug server.Plug, st marlin.Status) fixture {
 
 func serve(t *testing.T, s *server.Server) fixture {
 	t.Helper()
+	return serveOn(t, s, nil)
+}
+
+// serveOn runs the server on the listener given, or a new one on 127.0.0.1 if it's nil.
+func serveOn(t *testing.T, s *server.Server, listen net.Listener) fixture {
+	t.Helper()
 	dir := t.TempDir()
 	fingerprint, err := secure.Init(dir, net.IPv4(127, 0, 0, 1))
 	if err != nil {
@@ -110,9 +116,11 @@ func serve(t *testing.T, s *server.Server) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	ln := listen
+	if ln == nil {
+		if ln, err = net.Listen("tcp", "127.0.0.1:0"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	s.Allowed = func(fp string) bool { return secure.Allowed(dir, fp) }
 	ctx, cancel := context.WithCancel(context.Background())
