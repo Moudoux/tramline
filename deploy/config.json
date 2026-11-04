@@ -1,0 +1,12 @@
+{
+  "listen": "192.168.1.121:8726",
+  "serial": {
+    "device": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+    "baud": 250000
+  },
+  "hue": {
+    "address": "192.168.1.128",
+    "bridge_id": "001788FFFE123456",
+    "plug_light_id": ""
+  }
+}
