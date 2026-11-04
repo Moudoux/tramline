@@ -1,10 +1,8 @@
-# Tramline
+# Tramline engineering notes
 
-A small print server for a Raspberry Pi that lets Claude power on, preheat, check, load and start prints on an Ender 3 V2.
+The record of Tramline's design, firmware findings, test results and open issues. For what it is and how to use it, see the [README](README.md).
 
-The name joins bed **tram**ming with the serial **line** to the printer.
-
-**Status: running on the Pi with mutual TLS, paired with the real Hue Bridge, and `tramline power` works on the real plug. Stage 5, read-only printer status, has passed on the real printer. Stage 6, heating, has passed on the real printer, including the 30-minute idle timeout at low temperatures. `tramline tram` works on the real printer. Stage 7 has passed on the real printer. Stage 8, SD upload, has passed on the real printer, at 14 KB/s with a sliced file. Stage 9, `print`, `cancel` and `estop`, has passed on the real printer with a cold file and a small real print. Tram before every print is in use, with only its pass path run on the real printer. The first long print, 4 h 10 min, finished cleanly on 2026-11-04. Stage 10, printing by streaming, has passed on the real printer, including a 63-minute job that finished cleanly on 2026-11-04 with no resends, see Streaming design.** Last updated 2026-11-04.
+**A read-only web page, `tramline web`, is installed on the Pi, see Web page. Status: running on the Pi with mutual TLS, paired with the real Hue Bridge, and `tramline power` works on the real plug. Stage 5, read-only printer status, has passed on the real printer. Stage 6, heating, has passed on the real printer, including the 30-minute idle timeout at low temperatures. `tramline tram` works on the real printer. Stage 7 has passed on the real printer. Stage 8, SD upload, has passed on the real printer, at 14 KB/s with a sliced file. Stage 9, `print`, `cancel` and `estop`, has passed on the real printer with a cold file and a small real print. Tram before every print is in use, with only its pass path run on the real printer. The first long print, 4 h 10 min, finished cleanly on 2026-11-04. Stage 10, printing by streaming, has passed on the real printer, including a 63-minute job that finished cleanly on 2026-11-04 with no resends, see Streaming design.** Last updated 2026-11-04.
 
 | Part | State |
 |---|---|
@@ -21,15 +19,16 @@ The name joins bed **tram**ming with the serial **line** to the printer.
 | Printing from SD, `cancel`, `estop`, line numbers on every command | Done, tested on the real printer. `estop` only on a cold print, and resends of numbered commands, link drops and a stuck print only on the simulator |
 | Tram before every print, `print --continue`, LCD messages, `tram_soak_seconds` | Done. The pass path and LCD messages have run on the real printer. A failed check, `--continue` and a soak above 0 are simulator only |
 | Printing by streaming | Done 2026-11-04. Passed on the real printer: to the end, a long print of 182,184 lines, cancel cold and hot, the LCD's Stop, `M85` firing, a restart. A real resend, a lost link and `estop` during a stream are simulator only, as none has happened on the printer. The LCD's Pause isn't supported. See Streaming design |
+| Read-only web page, `tramline web` | Built and installed 2026-11-04. The user has tried it on the simulator and on a phone. It hasn't yet been watched during a real print. See Web page |
 | `tramline update` | Not started |
 
 ## Next session
 
 **Current state, 2026-11-04, evening:** stage 10 is done. Test 8, the long print, finished cleanly at 19:46:01 GMT with 0 resends, see Long print by streaming. The logs are in `test-logs/2026-11-04-stream/t8-long/`, with `server.log` and `kernel.log` saved. The code is in the private `stringing-along` repository, without `test-logs/`, `dist/` or `.cache/`, so those logs exist only on this machine.
 
-**Next:** nothing is under way. The skills for SolidCraft, Cura slicing and Tramline were made 2026-11-04, in `../.claude/skills/`, so keep the `tramline` one in step with this README. The small real copy on the rewritten `sendLines` passed, see Upload's result under Long print by streaming.
+**Next:** the web page is installed, see Web page, and needs watching during a real print. What's worth checking there is listed under Not proven on the real printer. The skills for SolidCraft, Cura slicing and Tramline were made 2026-11-04, in `../.claude/skills/`, so keep the `tramline` one in step with this README. The small real copy on the rewritten `sendLines` passed, see Upload's result under Long print by streaming.
 
-**Installed versus source:** the Pi, `dist/` and the source are all `dev-20261104181934`, with stage 10. The user runs `deploy/install.sh raspberrypi` to install a new build.
+**Installed versus source:** the Pi is `dev-20261104204513`, with the web page and the simulator's options. `dist/` is `dev-20261104205612`, which only changes what the client's `tramline web` prints, so the Pi doesn't need it. The user runs `deploy/install.sh raspberrypi` to install a new build.
 
 **Print design:** built as approved and tested on the real printer, with its firmware findings and results, under Print design below. Test files are in `test-logs/2026-11-03-print/`: `dry-run.gcode`, about 60 seconds of `G4` and `M118` with no heat or movement, `dry-run-long.gcode`, about 10 minutes of the same, and `test-tile_PETG.gcode`, 15 x 15 x 1 mm, 2 min 45 s printing and about 10 minutes in all from cold.
 
@@ -44,6 +43,8 @@ The name joins bed **tram**ming with the serial **line** to the printer.
 
 **Not proven on the real printer:**
 
+- The web page on a real phone. Its layout and gestures have only run in a phone-sized frame in desktop Firefox, with made-up touch events, so Safari's and Chrome's own handling of pinch, and drawing speed on a phone's GPU, are unproven.
+- The web page during a print: how far the drawn head is from the real one, whether the guesses at how many moves it lags (`LAG_MOVES` in `internal/server/web/viewer.js`) are right, and that browsers watching leave a stream's timing alone. They should, as the page never touches the serial port, but only a real print shows it.
 - The wizard during a wait for adjusting. A failed tram check, the parked wait, the LCD's message and `--continue` first ran for real on 2026-11-04, see First stream on the real printer. They've run once, on back-left.
 - The late-reply resync, as no command has timed out there, though `M118` does echo as it needs.
 - `tram`'s failure handling: probe failure, link drop mid-probe, firmware halt. Simulator only.
@@ -292,7 +293,7 @@ With SSH gone, Tramline must provide its own access control and encryption. Anyo
 - **Server identity:** `tramline init` creates the server's key. The client gets its fingerprint at login, not from the first connection, and refuses any other server.
 - **Client identity:** `tramline keygen` creates the key on the client, so a private key never has to move between machines. TLS proves the client holds it, and it's never sent.
 - **Allow list:** `tramline allow <fingerprint>` adds a client to `/var/lib/tramline/clients.allow`, which holds only public fingerprints. It's read for every connection and request, so allowing or revoking needs no restart, and revoking also cuts off open connections. A missing or corrupted list denies everyone.
-- **TLS 1.3 only.** Every endpoint needs an allowed certificate, and plain HTTP is refused.
+- **TLS 1.3 only.** Every API endpoint needs an allowed certificate. Plain HTTP on the same port reaches only the read-only web page, which the user asked for on 2026-11-04, see Web page.
 - **Listening address:** LAN only for now, decided by the user. The server listens on `192.168.1.121`, set in the config, and not on `eth0.2`, Tailscale or the Docker bridges. Containers could still route to it, which is why client certificates are required. Adding Tailscale later is a config change.
 - **Limits enforced by the server,** not the client: see Safety rules.
 - **Files:** uploaded names are restricted to a safe character set and length, with a maximum upload size.
@@ -349,6 +350,7 @@ Port `8726` is proposed, which spells TRAM on a phone keypad. Not currently in u
 | `tramline keygen` | none | On a client, once: create its key and show its fingerprint |
 | `tramline login <url> <server-fingerprint>` | `GET /v1/status` | Check both certificates and save the connection |
 | `tramline status` | `GET /v1/status` | Power, temperatures, job, current activity |
+| `tramline web [--url]` | `http://<host>:8726/`, no certificate | Open the read-only web page in a browser, or just show its address. Built |
 | `tramline watch` | `GET /v1/events` | Live status stream |
 | `tramline power on\|off` | `POST /v1/power` | Plug control; off refuses while hot or printing |
 | `tramline preheat [bed] [nozzle]` | `POST /v1/preheat` | Start heating |
@@ -367,6 +369,59 @@ Port `8726` is proposed, which spells TRAM on a phone keypad. Not currently in u
 | `tramline update <binary>` | `PUT /v1/update` | Replace the server binary |
 
 Long jobs return straight away with a job ID, and clients follow them through `status` or `watch`. An upload arrives at the Pi quickly over the network, so the slow serial copy carries on even if the client disconnects, and a failed copy can retry without re-sending the file.
+
+### Web page
+
+Built 2026-11-04, at the user's request. `tramline web` opens `http://192.168.1.121:8726/`: status, temperatures and progress, with the current job's file drawn in 3D, what's printed in orange, what's to come as a ghost, and a marker for the head. Drag to turn, right-drag to move, scroll to zoom, double-click to reset.
+
+**On a phone:** open the same address, as `tramline web` only opens a browser on the machine running it. One finger turns, two fingers pinch to zoom and move together, and a double-tap resets. The panel gets its own part of the screen, at the top, or at the side with the phone turned, with a Details button for the rest, and the view frames the model to fit a tall screen.
+
+**How it shares the port:** the first byte of a connection says which server gets it, in `splitListener` in `internal/server/web.go`. `0x16` starts a TLS handshake, and goes to the API with mutual TLS as before. Anything else goes to a separate `http.Server` with only the page's routes, so the API can't be reached from it, whatever the request. HTTPS in a browser fails, as a browser has no client certificate.
+
+**What it exposes, with no login, to anything that can reach the port:** state, temperatures, the job's name, notes and errors, and the moves of the current job's file. It's plain HTTP, so anyone on the LAN can read them on the way. `WebStatus` is its own list of fields, so nothing added to the API becomes public by accident. Other files can't be listed or fetched. The port is still LAN only, by the `listen` setting.
+
+**It can't affect a print:** it reads only what the server already holds in memory, and the uploaded file. It sends nothing to the printer or the Hue Bridge, and takes neither the operation lock nor the link. So plug state isn't shown, as reading it is a call to the bridge. Parsing the file takes about 90 ms for 92,794 lines on this machine, more on the Pi, is done once and kept in memory.
+
+**The head's position is worked out, not measured.** `AUTOREPORT_POS` isn't in this firmware, and `M114` would wait in the queue, or can't be sent at all during a stream, which holds the link. So:
+
+- The server reads the file's moves with `gcode.ParsePath`, using the same `Reader` and byte count as a job's position, and gives them to the page in a compact binary form.
+- Times along the file come from its feed rates, scaled to the slicer's `;TIME:`.
+- The page looks up the move at the job's position, steps back by `LAG_MOVES`, and glides the head there at the print's speed. Those are estimates of what's queued: 16 moves in a stream and 32 from the card, from the firmware's buffer sizes, not measured.
+- **A stream** updates about once a second, as each line is answered, so it's close to live.
+- **A print from the card** only has a position about every 30 seconds, and later if `M27` waits. Between them the page carries on at the file's speeds for up to 50 seconds, then waits. If it's more than 30 seconds out it jumps. So it's an estimate that gets corrected, and files under about 4 MB go to the card by default.
+
+**Not drawn:** a print started from the LCD, whose file isn't on the Pi by that name, shows status only. The model is the file on the Pi, so a file replaced after its print shows the new one until the next job. The start G-code's heater waits and `G29` aren't in the times, as a job's position is what moves the head on.
+
+**No libraries:** raw WebGL 2, embedded in the binary with `go:embed`, about 34 KB, in `internal/server/web/`. It's a single page polling `/api/status` once a second, as polling recovers by itself from a server restart. A content security policy allows only its own files. `go test` doesn't run the JavaScript, so a change to it needs a look in a browser.
+
+#### Trying it on the simulator
+
+This needs no Pi and no printer, and can run while the real server is printing, as it's all on this machine. After `./build.sh`:
+
+```sh
+./sim-web.sh ../projects/claude-monitor-case/stand-retro-print_PETG.gcode
+```
+
+It starts a simulated printer on `127.0.0.1:18726`, uploads the file, starts a print and opens the page in your browser. Ctrl-C ends it.
+
+| Option | What it does |
+|---|---|
+| `--minutes <n>` | How long the print takes, default 10 |
+| `--sd` | Prints from the simulated card, to see the position arrive about every 30 seconds, instead of streaming |
+| `--no-open` | Shows the address without opening a browser |
+| `--lan` | Listens on this machine's network address instead of `127.0.0.1`, and shows the address to open on a phone. A firewall on this machine may need to allow port 18726 |
+| no file | Just the idle page |
+
+The script keeps everything in a temporary folder that it removes at the end, including a throwaway client key, with `XDG_CONFIG_HOME` pointing there. So your real login isn't used, and the plain `tramline` command still talks to the Pi. To use the client on the simulator, for instance to try `cancel`, copy the line it prints, which starts with that `XDG_CONFIG_HOME`.
+
+**What it can't tell you:**
+
+- How close the drawn head is to a real one. The simulator has no real motion, so this only shows that the page follows a position.
+- Temperatures from `--sd`: the simulator doesn't run a card file's lines, so the heaters stay where the tram check left them. A stream does follow the file's.
+- Whether "Time left" is right. It comes from the slicer's times, so in a print sped up to 10 minutes it reads hours.
+- The head jumps rather than glides in a sped-up print, as it falls over 30 seconds behind the file's own pace. The closer `--minutes` is to the slicer's time, the more it looks like a real print.
+
+Plain `serve --sim` still has a bed that fails its tram check, which is how to see the page's `needs you` state. `--sim-level` gives it a bed that passes, `--sim-line-delay` sets each numbered line's time, which paces a stream, and `--sim-print-time` sets how long a card print takes.
 
 ### Print flow
 
@@ -1049,7 +1104,7 @@ Each stage must pass before moving on. **Hue comes first, so Claude can power th
 
 Log real drift first, then try one motor on one corner if it's justified. Solid bed spacers may be a simpler fix.
 
-**Other later ideas:** binary upload, a camera, a small web page, an MCP server wrapping the API.
+**Other later ideas:** binary upload, a camera, an MCP server wrapping the API.
 
 ## Related files
 
