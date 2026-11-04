@@ -28,11 +28,19 @@ type Login struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-// Dir is where the client keeps its login and key.
+// Dir is where the client keeps its login and key: ~/.config/tramline, or under
+// XDG_CONFIG_HOME if that's set. It's the same on every system, as os.UserConfigDir
+// ignores XDG_CONFIG_HOME on macOS, and sim-web.sh relies on it to keep off the real login.
 func Dir() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(home, ".config")
+	} else if !filepath.IsAbs(dir) {
+		return "", errors.New("XDG_CONFIG_HOME is not an absolute path")
 	}
 	return filepath.Join(dir, "tramline"), nil
 }

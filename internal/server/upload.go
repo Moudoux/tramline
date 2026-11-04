@@ -421,7 +421,7 @@ func checkDiskSpace(dir string, size int64) error {
 	if err := syscall.Statfs(dir, &st); err != nil {
 		return err
 	}
-	free := int64(st.Bavail) * st.Bsize
+	free := int64(st.Bavail) * int64(st.Bsize) // Bsize's type differs between systems
 	if free-max(size, 0) < uploadSpare {
 		return fmt.Errorf("not enough disk space on the server: %d MB free", free>>20)
 	}

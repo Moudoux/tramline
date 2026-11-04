@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -413,7 +414,11 @@ func runWeb(args []string) error {
 	}
 	// Some browsers stay in the foreground of what starts them, so a launcher still going
 	// after this long is taken to have worked, and it carries on after this exits.
-	opener := exec.Command("xdg-open", address)
+	launcher := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		launcher = "open"
+	}
+	opener := exec.Command(launcher, address)
 	if err := opener.Start(); err != nil {
 		return fmt.Errorf("couldn't open a browser, the page is at %s: %w", address, err)
 	}

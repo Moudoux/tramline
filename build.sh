@@ -2,7 +2,7 @@
 # Builds and tests Tramline inside a pinned Go container, so Go isn't needed on
 # this machine. Networking is off, so nothing can be downloaded during a build.
 #
-#   ./build.sh          check, test, then build dist/tramline-linux-{arm64,amd64}
+#   ./build.sh          check, test, then build dist/tramline-linux-{arm64,amd64} and dist/tramline-darwin-arm64
 #   ./build.sh test     check and test only
 set -eu
 
@@ -41,17 +41,19 @@ in_container "$IMAGE" sh -euc '
 		exit 1
 	fi
 	go vet ./...
+	GOOS=darwin GOARCH=arm64 go vet ./...
 	go test -count=1 -timeout 120s ./...
 '
 
 [ "${1:-}" = test ] && exit 0
 
 in_container -e VERSION="$VERSION" "$IMAGE" sh -euc '
-	for arch in arm64 amd64; do
-		GOOS=linux GOARCH=$arch go build -trimpath -buildvcs=false \
+	for target in linux/arm64 linux/amd64 darwin/arm64; do
+		os=${target%/*} arch=${target#*/}
+		GOOS=$os GOARCH=$arch go build -trimpath -buildvcs=false \
 			-ldflags "-s -w -X main.version=$VERSION" \
-			-o "dist/tramline-linux-$arch" .
+			-o "dist/tramline-$os-$arch" .
 	done
+	cd dist
+	sha256sum tramline-linux-arm64 tramline-linux-amd64 tramline-darwin-arm64 | tee SHA256SUMS
 '
-
-(cd dist && sha256sum tramline-linux-arm64 tramline-linux-amd64 | tee SHA256SUMS)

@@ -17,7 +17,7 @@ The same binary is both server and client. Only the server touches the printer a
 ## Printing
 
 ```sh
-alias tramline=dist/tramline-linux-amd64     # run from this folder
+alias tramline=dist/tramline-linux-amd64     # run from this folder, or tramline-darwin-arm64 on a Mac
 
 tramline status                              # is anything running?
 tramline upload part_PETG.gcode              # save it on the Pi, and copy small files to the SD card
@@ -59,10 +59,10 @@ Run `tramline help` for everything, including the options and the commands used 
 
 ## Building and installing
 
-Only Docker is needed, and the build uses the standard library alone.
+Only Docker is needed, and the build uses the standard library alone. The macOS builds are for the client and the simulator: only Linux can open a real serial port, so the server stays on the Pi.
 
 ```sh
-./build.sh                       # check, test and build into dist/
+./build.sh                       # check, test and build for Linux and macOS into dist/
 ./build.sh test                  # check and test only
 deploy/install.sh raspberrypi    # install on the Pi, which uses sudo there
 ```

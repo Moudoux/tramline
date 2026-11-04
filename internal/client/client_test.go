@@ -934,3 +934,26 @@ func TestPrintTramLoopOnSimulator(t *testing.T) {
 		return st.Print != nil && st.Print.State == server.PrintCancelled
 	})
 }
+
+func TestDirFollowsXDGConfigHome(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/somewhere/else")
+	dir, err := Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != "/somewhere/else/tramline" {
+		t.Fatalf("dir = %q", dir)
+	}
+}
+
+func TestDirDefaultsToDotConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "/home/someone")
+	dir, err := Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir != "/home/someone/.config/tramline" {
+		t.Fatalf("dir = %q", dir)
+	}
+}

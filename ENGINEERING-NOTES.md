@@ -246,7 +246,7 @@ From the wiki:
 
 ### Build and dependencies
 
-Run `./build.sh` for checks, tests and binaries in `dist/`, or `./build.sh test` for checks and tests only. **Only Docker is needed**, as the user asked, with no Go setup on this machine.
+Run `./build.sh` for checks, tests and binaries in `dist/`, or `./build.sh test` for checks and tests only. **Only Docker is needed**, as the user asked, with no Go setup on this machine. It also builds `dist/tramline-darwin-arm64`, for the client and `serve --sim`. `internal/serial` has a stub off Linux that refuses to open a port, so nothing here has driven a printer from a Mac. Tests run on Linux only, in the container, and macOS gets `go vet`; the Mac client has been run by hand against `sim-web.sh`.
 
 - The official `golang:1.27.3-alpine` image is pinned by digest in `build.sh`, so a changed image can't slip in. Upgrading Go means changing that line on purpose.
 - Containers run with `--network none` and `GOPROXY=off`, so nothing can be downloaded during a build.

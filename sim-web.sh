@@ -20,12 +20,21 @@ minutes=10
 open=1
 listen=127.0.0.1
 file=
+
+lan_address() {
+	if [ "$(uname -s)" = Darwin ]; then
+		ipconfig getifaddr "$(route -n get default | sed -n 's/.*interface: //p')"
+	else
+		ip route get 1.1.1.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p'
+	fi
+}
+
 while [ $# -gt 0 ]; do
 	case $1 in
 	--sd) sd=1 ;;
 	--minutes) minutes=${2:?--minutes needs a number}; shift ;;
 	--no-open) open= ;;
-	--lan) listen=$(ip route get 1.1.1.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p') ;;
+	--lan) listen=$(lan_address) ;;
 	-*) echo "usage: $0 [--sd] [--minutes <n>] [--no-open] [--lan] [file.gcode]" >&2; exit 2 ;;
 	*) file=$1 ;;
 	esac
@@ -37,7 +46,10 @@ done
 url=https://$listen:$port
 
 here=$(cd "$(dirname "$0")" && pwd)
-tramline=$here/dist/tramline-linux-amd64
+case $(uname -s) in
+Darwin) tramline=$here/dist/tramline-darwin-arm64 launcher=open ;;
+*) tramline=$here/dist/tramline-linux-amd64 launcher=xdg-open ;;
+esac
 [ -x "$tramline" ] || { echo "no $tramline, run ./build.sh first" >&2; exit 1; }
 
 temp=$(mktemp -d)
@@ -109,7 +121,7 @@ if [ -n "$open" ]; then
 		else
 			unset XDG_CONFIG_HOME
 		fi
-		exec xdg-open "$address"
+		exec "$launcher" "$address"
 	) >/dev/null 2>&1 &
 fi
 if [ "$listen" != 127.0.0.1 ]; then
