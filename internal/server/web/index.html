@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tramline</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="view" aria-label="3D view of the print"></canvas>
+
+<aside id="panel">
+  <header>
+    <h1>Tramline</h1>
+    <span id="badge" class="badge">connecting</span>
+  </header>
+
+  <p id="file" class="file"></p>
+
+  <div id="progress-block" hidden>
+    <div class="bar"><div id="bar-fill"></div></div>
+    <dl class="grid">
+      <div><dt>Progress</dt><dd id="percent"></dd></div>
+      <div><dt>Layer</dt><dd id="layer"></dd></div>
+      <div><dt>Time left</dt><dd id="left"></dd></div>
+      <div class="extra"><dt>Running for</dt><dd id="elapsed"></dd></div>
+    </dl>
+  </div>
+
+  <dl class="grid temps">
+    <div><dt>Nozzle</dt><dd id="nozzle">–</dd></div>
+    <div><dt>Bed</dt><dd id="bed">–</dd></div>
+  </dl>
+
+  <p id="message" class="message" hidden></p>
+  <p id="problem" class="problem" hidden></p>
+
+  <button id="more" type="button" aria-expanded="false">Details</button>
+  <footer>
+    <p id="estimate" class="hint" hidden></p>
+    <p class="hint for-mouse">Read-only. Drag to turn, right-drag to move, scroll to zoom, double-click to reset.</p>
+    <p class="hint for-touch">Read-only. One finger turns, two fingers pinch to zoom and move, double-tap resets.</p>
+    <p id="version" class="hint"></p>
+  </footer>
+</aside>
+
+<div id="no-webgl" hidden>This browser can't show the 3D view, as WebGL 2 isn't available. The status still updates.</div>
+
+<script src="viewer.js"></script>
+</body>
+</html>

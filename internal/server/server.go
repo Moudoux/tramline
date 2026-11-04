@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"time"
@@ -85,6 +86,7 @@ type Server struct {
 	tram  tramState
 	files fileState
 	print printState
+	web   webState
 	ctx   context.Context
 }
 
@@ -96,7 +98,7 @@ func (s *Server) baseCtx() context.Context {
 	return context.Background()
 }
 
-// Handler returns the routes. Every route requires an allowed client certificate.
+// Handler returns the API's routes. Every route requires an allowed client certificate.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", s.handleStatus)
@@ -288,7 +290,8 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
-// Serve runs until ctx ends. Plain HTTP on the same port is rejected by TLS.
+// Serve runs until ctx ends. The port carries two servers: the API, over TLS with client
+// certificates, and the read-only web page, over plain HTTP, which can't reach the API.
 func (s *Server) Serve(ctx context.Context, ln net.Listener, tlsCfg *tls.Config) error {
 	s.ctx = ctx
 	s.loadPrintJob()
@@ -299,18 +302,38 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener, tlsCfg *tls.Config)
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    16 << 10,
 	}
+	web := &http.Server{
+		Handler:           s.WebHandler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       webTimeout,
+		WriteTimeout:      webTimeout,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    16 << 10,
+	}
 	if s.Heaters != nil {
 		go s.watchHeaters(ctx)
 	}
+	tlsConns, plainConns := splitListener(ln)
+	defer ln.Close()
+	webDone := make(chan struct{})
+	go func() {
+		defer close(webDone)
+		if err := web.Serve(plainConns); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+			log.Printf("web page: %v", err)
+		}
+	}()
 	stop := context.AfterFunc(ctx, func() {
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(shutdown)
+		web.Shutdown(shutdown)
 	})
 	defer stop()
-	err := srv.ServeTLS(ln, "", "")
-	if errors.Is(err, http.ErrServerClosed) {
-		return nil
+	err := srv.ServeTLS(tlsConns, "", "")
+	if errors.Is(err, http.ErrServerClosed) || errors.Is(err, net.ErrClosed) {
+		err = nil
 	}
+	ln.Close()
+	<-webDone
 	return err
 }

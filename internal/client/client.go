@@ -74,6 +74,19 @@ func Load(dir string) (Login, error) {
 	return l, json.Unmarshal(data, &l)
 }
 
+// WebURL is the address of the server's read-only web page: the same host and port as
+// the API, over plain HTTP.
+func (l Login) WebURL() (string, error) {
+	u, err := url.Parse(l.URL)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme != "https" || u.Host == "" {
+		return "", fmt.Errorf("server URL must be https://host:port, got %q", l.URL)
+	}
+	return "http://" + u.Host + "/", nil
+}
+
 const (
 	requestTimeout = 30 * time.Second
 	// coolTimeout has to outlast a move, because the printer can't act on cool

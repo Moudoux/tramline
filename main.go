@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -42,12 +43,14 @@ Server, on the Pi:
   tramline allow <fingerprint> [--name <name>]   allow a client, no restart needed
   tramline revoke <fingerprint>                  remove a client
   tramline clients                               list allowed clients
-  tramline serve [--config <file>] [--sim]       run the server
+  tramline serve [--config <file>] [--sim]       run the server, see sim-web.sh to try --sim
 
 Client:
   tramline keygen                                create this client's key, once
   tramline login <url> <server-fingerprint>      save and check the connection
   tramline status [--json]                       show the printer's status
+  tramline web [--url]                           open the read-only status and 3D print
+                                                 view in a browser, or just show its address
   tramline power on|off                          switch the printer's plug
   tramline preheat [bed] [nozzle]                start heating, default bed 80 C, nozzle 150 C
   tramline cool                                  turn the heaters off
@@ -106,6 +109,8 @@ func main() {
 		err = runLogin(args)
 	case "status":
 		err = runStatus(args)
+	case "web":
+		err = runWeb(args)
 	case "power":
 		err = runPower(args)
 	case "preheat":
@@ -263,6 +268,9 @@ func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	path := fs.String("config", config.DefaultPath, "config file")
 	useSim := fs.Bool("sim", false, "use a simulated printer instead of the serial port")
+	simLevel := fs.Bool("sim-level", false, "with --sim, a bed that passes its tram check")
+	simLineDelay := fs.Duration("sim-line-delay", 0, "with --sim, how long each numbered line takes")
+	simPrintTime := fs.Duration("sim-print-time", 2*time.Minute, "with --sim, how long a print from the card takes")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -281,7 +289,12 @@ func runServe(args []string) error {
 		MoveDelay: 500 * time.Millisecond,
 		PrintTime: 2 * time.Minute,
 		Corners:   sim.Corners{FL: 0.10, FR: 0.13, BR: 0.21, BL: 0.09},
+		LineDelay: *simLineDelay,
 	}}
+	simPlug.Options.PrintTime = *simPrintTime
+	if *simLevel {
+		simPlug.Options.Corners = sim.Corners{FL: 0.10, FR: 0.11, BR: 0.12, BL: 0.10}
+	}
 	if *useSim {
 		open = simPlug.Open
 	}
@@ -370,6 +383,50 @@ func loggedIn() (*client.Client, error) {
 		return nil, err
 	}
 	return client.New(login, cert)
+}
+
+// webOpenWait is how long tramline web waits to see whether the browser's launcher fails.
+const webOpenWait = 3 * time.Second
+
+// runWeb needs only the saved address, as the page takes no certificate.
+func runWeb(args []string) error {
+	fs := flag.NewFlagSet("web", flag.ContinueOnError)
+	urlOnly := fs.Bool("url", false, "show the address without opening a browser")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dir, err := client.Dir()
+	if err != nil {
+		return err
+	}
+	login, err := client.Load(dir)
+	if err != nil {
+		return err
+	}
+	address, err := login.WebURL()
+	if err != nil {
+		return err
+	}
+	if *urlOnly {
+		fmt.Println(address)
+		return nil
+	}
+	// Some browsers stay in the foreground of what starts them, so a launcher still going
+	// after this long is taken to have worked, and it carries on after this exits.
+	opener := exec.Command("xdg-open", address)
+	if err := opener.Start(); err != nil {
+		return fmt.Errorf("couldn't open a browser, the page is at %s: %w", address, err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- opener.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("couldn't open a browser, the page is at %s: %w", address, err)
+		}
+	case <-time.After(webOpenWait):
+	}
+	return nil
 }
 
 func runPower(args []string) error {
