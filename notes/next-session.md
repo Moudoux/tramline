@@ -1,0 +1,63 @@
+# Next session
+
+Part of the Tramline engineering notes, see the [index](README.md). Other sections are named in the text, as in "see Web page": the index says which file each is in.
+
+**Newest of all, 2026-11-05, night:** the user asked for a live view of the head during the tram check and the mesh probing. Planned, not started, see Probe view for what the firmware reports and the plan. The user was given `deploy/install.sh raspberrypi` for the GUI build, `dev-20261105212030`. Whether it was installed isn't known: check `tramline status`.
+
+**Newest, 2026-11-05, late:** `tramline gui` is built, a local web GUI started by the client that does everything the CLI does, including uploads from the browser. It has passed `go test` and a run-through in headless Chrome on the simulator, see Desktop GUI for what's proven and what isn't. **Committed and pushed to main on 2026-11-05:** the GUI, the move of the read-only page's files into `internal/webui/`, the split of the old `ENGINEERING-NOTES.md` into this folder, and the Probe view plan. `dist/` has the new build, not yet installed on the Pi. The GUI needs nothing new on the Pi, so it can be used before installing. Next: the user tries `tramline gui` against the real Pi.
+
+**Newest, 2026-11-05:** scheduled prints are built, pass on the simulator and are installed on the Pi, but haven't run on the real printer, see Scheduled prints for what to test first. Everything below this paragraph was written before that.
+
+**Also 2026-11-05, asked for by the user after that, built and simulator only:** see CLI changes under Scheduled prints. Every print now turns the printer off, `print` turns it on, `upload` only uploads, `mode` is gone, `--from pi|sd` is required, and the web page lists scheduled prints.
+
+Auto-off on every print means a real power cycle after each one, so the unexplained Pi hang and the plug's self-off under Open issue matter more. Capture the kernel log during the first real tests.
+
+**Installed and committed:** the user installed `dev-20261105183233` on the Pi on 2026-11-05, and `status` confirmed it. It's committed and pushed to main. Nothing in it has run on the real printer yet: the first test proposed is scheduling `dry-run.gcode` about 20 minutes ahead with `--from pi`, about 30 minutes in all, with the kernel log captured, and only with the user's OK.
+
+**Current state, 2026-11-04, evening:** stage 10 is done. Test 8, the long print, finished cleanly at 19:46:01 GMT with 0 resends, see Long print by streaming. The logs are in `test-logs/2026-11-04-stream/t8-long/`, with `server.log` and `kernel.log` saved. The code is in the private `stringing-along` repository, without `test-logs/`, `dist/` or `.cache/`, so those logs exist only on this machine.
+
+**Next:** the web page is installed, see Web page, and needs watching during a real print. What's worth checking there is listed under Not proven on the real printer. The skills for SolidCraft, Cura slicing and Tramline were made 2026-11-04, in `../.claude/skills/`, so keep the `tramline` one in step with these notes. The small real copy on the rewritten `sendLines` passed, see Upload's result under Long print by streaming.
+
+**Installed versus source:** the Pi and `dist/` are both `dev-20261104213525`, which adds listening by interface, with `"listen_interfaces": ["eth0", "tailscale0"], "port": 8726` in `/etc/tramline/config.json`, see Listening by interface. The user runs `deploy/install.sh raspberrypi` to install a new build.
+
+**Print design:** built as approved and tested on the real printer, with its firmware findings and results, under Print design below. Test files are in `test-logs/2026-11-03-print/`: `dry-run.gcode`, about 60 seconds of `G4` and `M118` with no heat or movement, `dry-run-long.gcode`, about 10 minutes of the same, and `test-tile_PETG.gcode`, 15 x 15 x 1 mm, 2 min 45 s printing and about 10 minutes in all from cold.
+
+**Bed state:** in tram at the last checks, hot, 2026-11-04: 0.055 mm once, a fail, then after a small back-left turn 0.037, 0.029, 0.043, 0.037, 0.048, 0.040 and 0.033 mm, so it moves around close to the limit. A failed check simply waits for an adjustment. Always ask the user to confirm the bed is clear before any print, as a finished print may be on it.
+
+**Plan:**
+
+1. **Tram before every print:** built and in use since 2026-11-04. The pass path has run on the printer, see Tram before printing.
+2. **Print the Claude Monitor stand:** done 2026-11-04, see Stand print result. In `../projects/claude-monitor-case/`, body "Stand Retro", `stand-retro-print_PETG.gcode`, 15.8 m, 2.7 MB. **It doesn't use the shared profile:** 0.16 mm layers with a 0.2 mm first layer, 2 walls, 6 top and 4 bottom layers, 10% grid, seam at the back, from a scratch copy of `../cura/`. `slice_petg.sh` alone gives a different print, at 0.2 mm, 3 walls, 20% gyroid and 9.4 MB, so compare a re-slice's header with the old file.
+3. **Stage 10, printing by streaming,** which large files need under `mode auto`, with `M85` as the hung-Pi safeguard. Done 2026-11-04, see Streaming design. The lost lines depend on window size or speed, and none were lost at one line at a time, see Lost lines: test B, though the cause is still unknown.
+4. **Skills for SolidCraft, Cura slicing and Tramline:** made 2026-11-04.
+
+**Not proven on the real printer:**
+
+- The web page on a real phone. Its layout and gestures have only run in a phone-sized frame in desktop Firefox, with made-up touch events, so Safari's and Chrome's own handling of pinch, and drawing speed on a phone's GPU, are unproven.
+- The web page during a print: how far the drawn head is from the real one, whether the guesses at how many moves it lags (`LAG_MOVES` in `internal/webui/shared/view.js`) are right, and that browsers watching leave a stream's timing alone. They should, as the page never touches the serial port, but only a real print shows it.
+- The wizard during a wait for adjusting. A failed tram check, the parked wait, the LCD's message and `--continue` first ran for real on 2026-11-04, see First stream on the real printer. They've run once, on back-left.
+- The late-reply resync, as no command has timed out there, though `M118` does echo as it needs.
+- `tram`'s failure handling: probe failure, link drop mid-probe, firmware halt. Simulator only.
+- History in `/var/lib/tramline/tram-history.jsonl`. It works on the simulator, but that folder can't be read without sudo, so it hasn't been checked on the Pi. Six real runs should be in it.
+- Knob direction on any corner but back-left.
+- The plug cut, which has only run against a fake plug.
+- A lost link during a print or a stream, a plug going off during one, and a stuck print being cancelled. `estop` during a hot print, a real stream or a copy. Resends of numbered commands, apart from copies: none happened in the 182,184 lines of the long stream. Simulator only.
+- Restarting the server during a real hot print or a heater wait.
+- Upload's failure handling other than resends: timeouts, cancelling, `cool` or the timer stopping a copy, a link drop, and `M29` at reconnect. Simulator only.
+
+**Other open issues:**
+
+- A real resend at a safe window, cause unknown, means a line may have been damaged on the wire, see Upload. Every command now has a line number and checksum, as decided on 2026-11-03. Numbered commands now run on the printer, but a resend of one, apart from copies, is still simulator only.
+- **Damaged replies from the printer:** three in 182,184 lines of the long stream, cause unknown, all harmless so far, see Long print by streaming. A small fix for a later build: log any reply that doesn't have the expected form, and leave a `P` over 15 out of the planner figures.
+- The LCD's bar and time left stay at 0 until a stream's first `M73` after the print screen opens at `M190`, about 3 minutes into printing on a 6 MB file, then work, and the user reports they tracked perfectly on the long print. Small fix for a later build: send `M73` again at the first real line.
+- After a Tramline cancel of a stream, the LCD says print done, 100%. Only cosmetic, but it misleads. The LCD's Pause during a stream isn't supported.
+- Files sliced before 2026-11-03 still have `G1 X0 Y{machine_depth}` in their end G-code, as `../cura/resolve_settings.py` only now fills it in, with Y220. Re-slice to get the fix. The user saw the bed come forward with the fix on the stand.
+- The log's gaps during a print, see Stand print result, are fixed in the stage 10 build. Temperatures about once a minute have run on the printer during streams. Each `M27` wait and lines arriving during one need an SD print, and in-flight bytes and timing at each resend need a real resend, so those are still simulator only.
+- Connecting took 18 seconds on one power-on, against the usual 9 to 11: the boot text arrived as garbage, and the first `M115` seems to have been lost, so the 10-second wait ran out. It recovered by itself. The garbage looks like a wrong baud rate during boot, which is only a guess.
+- `tram info` sends `G29 W`, which prints nothing useful on this build, so it could be dropped. `C29` in `M503` has what's needed.
+- `DefaultInset` is a constant, and the wizard may follow the mesh limits if they're changed in the LCD menu.
+- The motion limits (60 seconds' silence, 3 minutes for `G28`, 90 seconds for `G30`) are generous. Real figures are at most 2.77 seconds' silence, 19.5 seconds for `G28` and 5.5 seconds for `G30`.
+- A 0.05 mm limit means a bed within about 0.01 mm of it can flip between runs. Whether to add a margin is the user's decision.
+- `External Reset` on power-on, and which command the early `ok` at startup answers, are still unknown. `status` still shows the printer connected for about 3 seconds after power off, though it can't let heating through. The causes of the plug's one self-off and of the one Pi hang are unknown. The user still needs to review Hue rooms and routines before any long print.
+
+**Rules:** see the Elevated commands and Secrets sections. Build only with `./build.sh`. Ask the user before every test involving the printer, saying what it does and how long it should take. Capture kernel logs during power tests. Don't heat or move the printer without asking, and always ask for the bed to be confirmed clear before any print.

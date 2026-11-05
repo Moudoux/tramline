@@ -288,6 +288,21 @@ func (c *Client) DeleteFile(name string) error {
 	return c.do(http.MethodDelete, "/v1/files/"+url.PathEscape(name), nil, nil)
 }
 
+// Login is the server this client talks to.
+func (c *Client) Login() Login { return c.login }
+
+// Transport sends requests over the client's TLS, trusting only the saved server and
+// presenting the client's certificate. tramline gui forwards the browser's requests with it.
+func (c *Client) Transport() http.RoundTripper { return c.http.Transport }
+
+// Explain turns a failed connection into something a person can act on.
+func Explain(err error) error {
+	if err != nil && strings.Contains(err.Error(), "remote error: tls") {
+		return errors.New("the server refused this client, which must be allowed on the server: tramline allow <client-fingerprint>")
+	}
+	return err
+}
+
 func (c *Client) url(path string) string {
 	return strings.TrimRight(c.login.URL, "/") + path
 }
@@ -318,10 +333,7 @@ func (c *Client) doWithin(limit time.Duration, method, path string, in, out any)
 func (c *Client) send(req *http.Request, out any) error {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		if strings.Contains(err.Error(), "remote error: tls") {
-			return errors.New("the server refused this client, which must be allowed on the server: tramline allow <client-fingerprint>")
-		}
-		return err
+		return Explain(err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

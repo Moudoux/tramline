@@ -50,9 +50,12 @@ func addUpload(t *testing.T, s *Server, name, content string) {
 func TestWebServesThePage(t *testing.T) {
 	_, h := webRig(t)
 	for path, want := range map[string]string{
-		"/":          "text/html",
-		"/viewer.js": "javascript",
-		"/style.css": "text/css",
+		"/":                 "text/html",
+		"/page.js":          "javascript",
+		"/style.css":        "text/css",
+		"/shared/view.js":   "javascript",
+		"/shared/status.js": "javascript",
+		"/shared/theme.css": "text/css",
 	} {
 		w := webGet(h, http.MethodGet, path)
 		if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Content-Type"), want) {
@@ -60,6 +63,16 @@ func TestWebServesThePage(t *testing.T) {
 		}
 		if !strings.Contains(w.Header().Get("Content-Security-Policy"), "default-src 'none'") {
 			t.Errorf("%s has no content security policy", path)
+		}
+	}
+}
+
+// The GUI's files are only served by tramline gui, on the machine it runs on.
+func TestWebDoesNotServeTheGUI(t *testing.T) {
+	_, h := webRig(t)
+	for _, path := range []string{"/gui/index.html", "/gui/gui.js", "/shared/../gui/gui.js", "/gui.js"} {
+		if w := webGet(h, http.MethodGet, path); w.Code == http.StatusOK {
+			t.Errorf("%s: %d", path, w.Code)
 		}
 	}
 }

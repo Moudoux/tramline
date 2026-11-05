@@ -1,0 +1,12 @@
+/* Tramline's colours, shared by the read-only page and the GUI. */
+:root {
+  color-scheme: dark;
+  --bg: #15181c;
+  --panel: rgba(28, 32, 38, 0.92);
+  --line: #343a43;
+  --text: #e8eaed;
+  --muted: #9aa3ad;
+  --accent: #f0883e;
+  --good: #57c47a;
+  --bad: #f2645a;
+}

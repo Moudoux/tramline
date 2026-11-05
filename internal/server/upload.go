@@ -180,6 +180,10 @@ func (s *Server) uploadsDir() (string, error) {
 	return dir, os.MkdirAll(dir, 0o750)
 }
 
+// ValidFileName says whether the server would take a file by this name, so a client can
+// say so before sending it.
+func ValidFileName(name string) error { return validFileName(name) }
+
 func validFileName(name string) error {
 	lower := strings.ToLower(name)
 	if !fileNameRE.MatchString(name) || !(strings.HasSuffix(lower, ".gcode") || strings.HasSuffix(lower, ".gco")) {

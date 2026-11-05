@@ -1,5 +1,5 @@
-// Tramline's read-only print view. No libraries: raw WebGL 2, as the page is embedded in
-// the server's binary and the print server has no outside dependencies.
+// Tramline's 3D print view, shared by the read-only page and the GUI. No libraries: raw
+// WebGL 2, as the pages are embedded in the binary and Tramline has no outside dependencies.
 "use strict";
 
 // ---- What the printer's position is based on ----
@@ -16,7 +16,6 @@ const LAG_MOVES = { stream: 16, sd: 32 };
 const SD_COAST_SECONDS = 50;
 // Further than this from where it should be, the head jumps there rather than catching up.
 const SNAP_SECONDS = 30;
-const POLL_MS = 1000;
 // A big model is a lot to redraw for a head that has moved a little, and on a phone that
 // means battery. Turning the view always redraws at once.
 const MIN_DRAW_MS = window.matchMedia("(pointer: coarse)").matches ? 100 : 40;
@@ -29,8 +28,6 @@ const MAX_DISTANCE = 1500;
 
 const BED = 220;
 const FILAMENT_WIDTH = 0.45;
-
-const $ = (id) => document.getElementById(id);
 
 // ---- Small matrix helpers, column-major like WebGL ----
 
@@ -297,6 +294,9 @@ class Renderer {
     this.segVao = this.ribbonVao(this.segBuffer);
     this.partialVao = this.ribbonVao(this.partialBuffer);
     this.segments = 0;
+    // offsetX moves the view's centre right by this many CSS pixels, so a panel over the
+    // left of the canvas doesn't cover the middle of the bed.
+    this.offsetX = 0;
 
     this.buildBed();
     this.buildHead();
@@ -450,6 +450,8 @@ class Renderer {
     const eye = this.eye();
     const aspect = this.canvas.width / Math.max(this.canvas.height, 1);
     const proj = perspective(this.fov(), aspect, Math.max(this.camera.distance * 0.01, 0.5), this.camera.distance * 10 + 1000);
+    // A shift of the image on screen, which keeps the perspective of a centred camera.
+    if (this.offsetX) proj[8] -= (2 * this.offsetX) / Math.max(this.canvas.clientWidth, 1);
     const viewProj = multiply(proj, lookAt(eye, this.camera.target, [0, 0, 1]));
 
     // The bed: plate first, then its lines.
@@ -540,395 +542,245 @@ class Renderer {
   }
 }
 
-// ---- The page ----
+// ---- Following a job ----
 
-const state = {
-  status: null,
-  model: null,
-  modelJob: null,
-  modelMissing: false,
-  loading: false,
-  // Where the drawn head is, in seconds along the file.
-  playhead: 0,
-  target: 0,
-  coast: 0,
-  updatedAt: 0,
-  lastFrame: 0,
-  lastDraw: 0,
-  dirty: true,
-};
-
-let renderer = null;
-try {
-  renderer = new Renderer($("view"));
-} catch (err) {
-  console.error(err);
-  $("no-webgl").hidden = false;
-  $("view").hidden = true;
-}
-
-function clock(seconds) {
-  if (!isFinite(seconds) || seconds < 0) return "–";
-  const s = Math.round(seconds);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (h > 0) return `${h} h ${m} min`;
-  if (m > 0) return `${m} min ${s % 60} s`;
-  return `${s} s`;
-}
-
-function temp(now, target) {
-  if (now === undefined) return "–";
-  return target > 0 ? `${now.toFixed(1)} / ${target.toFixed(0)} °C` : `${now.toFixed(1)} °C`;
-}
-
-const STATE_TEXT = {
-  heating: ["heating", "active", "Heating for the tram check before printing."],
-  soaking: ["soaking", "active", "At temperature, letting the bed settle before the tram check."],
-  checking: ["checking tram", "active", "Probing the corners of the bed."],
-  adjusting: ["needs you", "bad", ""],
-  starting: ["starting", "active", "Tram check passed, starting the file."],
-  running: ["printing", "active", ""],
-  cancelling: ["cancelling", "bad", "The print is being cancelled."],
-  finished: ["finished", "good", ""],
-  cancelled: ["cancelled", "", ""],
-  scheduled: ["tram passed, scheduled", "good", ""],
-  failed: ["failed", "bad", ""],
-  unknown: ["ended, outcome unknown", "", ""],
-};
-
-const printing = (job) => job && (job.state === "running" || job.state === "cancelling");
-const activeJob = (job) => job && ["heating", "soaking", "checking", "adjusting", "starting", "running", "cancelling"].includes(job.state);
-
-function adjustingText(job) {
-  const parts = [];
-  const c = job.check;
-  if (c && !c.pass) {
-    parts.push(`Last tram check: ${c.action} ${c.corner}, turn its knob ${job.turn} seen from above. Range ${c.range_mm.toFixed(3)} mm.`);
-  }
-  parts.push(job.parked ? "The head is parked. The bed may be hot." : "The head may be low. The bed may be hot.");
-  parts.push("Finish with tramline print --continue, or tramline cancel.");
-  return parts.join(" ");
-}
-
-const SCHEDULE_TEXT = {
-  checking: "checking tram now",
-  waiting: "waiting",
-  starting: "starting",
-  printing: "printing",
-};
-const SCHEDULE_BAD = ["failed", "cancelled", "missed", "unknown"];
-
-// In the browser's own timezone, with the date, so it can't be misread.
-function scheduleWhen(at) {
-  return new Date(at).toLocaleString(undefined, {
-    weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZoneName: "short",
-  });
-}
-
-function addSpan(parent, className, text) {
-  const span = document.createElement("span");
-  span.className = className;
-  span.textContent = text;
-  parent.append(span);
-}
-
-function showSchedules(list) {
-  const items = list || [];
-  $("scheduled").hidden = items.length === 0;
-  $("scheduled-list").replaceChildren(...items.map((p) => {
-    const li = document.createElement("li");
-    if (p.ended) li.classList.add("ended");
-    // Asking for a cancel isn't a problem, but anything else that stopped it is worth seeing.
-    if (SCHEDULE_BAD.includes(p.state) && p.reason !== "cancelled on request") li.classList.add("bad");
-    addSpan(li, "when", scheduleWhen(p.at));
-    const from = p.from === "sd" ? "card" : "Pi";
-    addSpan(li, "what", `${p.name}, from the ${from}, ${SCHEDULE_TEXT[p.state] || p.state}`);
-    if (p.reason) addSpan(li, "why", p.reason);
-    return li;
-  }));
-}
-
-function showStatus(st) {
-  const job = st.print;
-  showSchedules(st.scheduled);
-  const badge = $("badge");
-  let text, kind, message = "";
-  if (!st.connected && !activeJob(job)) {
-    [text, kind] = ["printer off", ""];
-    message = "The printer isn't connected, or its power is off.";
-  } else if (activeJob(job)) {
-    [text, kind, message] = STATE_TEXT[job.state] || [job.state, "active", ""];
-    if (job.state === "adjusting") message = adjustingText(job);
-  } else if (st.tramming) {
-    [text, kind] = ["checking tram", "active"];
-  } else if (st.copy) {
-    [text, kind] = ["copying to card", "active"];
-    const pct = st.copy.total_bytes > 0 ? Math.floor((100 * st.copy.bytes) / st.copy.total_bytes) : 0;
-    message = `${st.copy.name}: ${pct}%`;
-  } else if (job) {
-    [text, kind, message] = STATE_TEXT[job.state] || [job.state, "", ""];
-  } else {
-    [text, kind] = ["idle", ""];
-  }
-  badge.textContent = text;
-  badge.className = "badge" + (kind ? " " + kind : "");
-
-  $("file").textContent = job ? job.name : "";
-  $("nozzle").textContent = st.temps ? temp(st.temps.nozzle, st.temps.nozzle_target) : "–";
-  $("bed").textContent = st.temps ? temp(st.temps.bed, st.temps.bed_target) : "–";
-  $("version").textContent = `Tramline ${st.version}${st.simulated ? ", simulated printer" : ""}`;
-
-  const notes = [message];
-  if (job && job.note) notes.push(job.note);
-  if (job && job.stopping) notes.push("Being cancelled.");
-  if (job && job.link_lost) notes.push("The link to the printer is lost, so this is out of date.");
-  if (job && job.elsewhere) notes.push("Started from the printer, not from here.");
-  if (job && state.modelMissing) notes.push("Its file isn't on the Pi, so there's no 3D view.");
-  const shown = notes.filter(Boolean).join(" ");
-  $("message").textContent = shown;
-  $("message").hidden = !shown;
-  $("problem").textContent = job && job.error ? job.error : "";
-  $("problem").hidden = !(job && job.error);
-
-  const showProgress = job && job.size > 0 && (job.pos > 0 || printing(job)) && !["heating", "soaking", "checking", "adjusting", "starting", "scheduled"].includes(job.state);
-  $("progress-block").hidden = !showProgress;
-  if (showProgress) {
-    const pct = Math.min((100 * job.pos) / job.size, 100);
-    $("bar-fill").style.width = `${pct}%`;
-    $("percent").textContent = `${pct.toFixed(pct < 10 ? 1 : 0)}%`;
-    $("elapsed").textContent = clock(job.run_seconds);
-  }
-  $("estimate").textContent = printing(job)
-    ? job.mode === "stream"
-      ? "Head position is worked out from the lines sent, not measured."
-      : "Head position is worked out from the card position, read about every 30 s, not measured."
-    : "";
-  $("estimate").hidden = !printing(job);
-}
-
-// Sets where the head should be from the job's position.
-function updateTarget(job) {
-  const model = state.model;
-  if (!model || !job) return;
-  if (job.state === "finished") {
-    state.target = model.seconds;
-    state.playhead = model.seconds;
-    return;
-  }
-  const index = model.moveAtPos(job.pos);
-  const lag = LAG_MOVES[job.mode] ?? 16;
-  // Nothing has moved yet if the position is still before the first real move.
-  const behind = Math.max(index - lag, 0);
-  let target = job.pos > 0 ? model.time[behind] : 0;
-  state.coast = 0;
-  if (job.mode === "sd" && job.state === "running" && job.pos > 0) {
-    state.coast = SD_COAST_SECONDS;
-    target += Math.min(job.moved_ago, SD_COAST_SECONDS);
-  }
-  state.target = Math.min(target, model.seconds);
-  state.updatedAt = performance.now();
-}
-
-async function loadModel(job) {
-  if (state.loading || !renderer) return;
-  state.loading = true;
-  try {
-    const resp = await fetch(`api/model/${job.id}`);
-    if (!resp.ok) {
-      state.model = null;
-      state.modelMissing = true;
-      renderer.setModel(null);
-    } else {
-      const model = new Model(await resp.arrayBuffer());
-      state.model = model;
-      state.modelMissing = false;
-      renderer.setModel(model);
-      renderer.frame(model);
-      state.playhead = Infinity;
+// PrintView draws the job's file on a canvas, with the head where the job's position puts
+// it, and lets the view be turned, moved and zoomed. Give it each job from the status.
+class PrintView {
+  // modelURL gives the address of a job's moves, from its ID.
+  constructor(canvas, modelURL) {
+    this.canvas = canvas;
+    this.modelURL = modelURL;
+    this.job = null;
+    this.model = null;
+    this.modelJob = null;
+    this.modelMissing = false;
+    this.loading = false;
+    // Where the drawn head is, in seconds along the file.
+    this.playhead = 0;
+    this.target = 0;
+    this.coast = 0;
+    this.updatedAt = 0;
+    this.lastFrame = 0;
+    this.lastDraw = 0;
+    this.dirty = true;
+    this.renderer = null;
+    try {
+      this.renderer = new Renderer(canvas);
+    } catch (err) {
+      console.error(err);
+      return;
     }
-    state.modelJob = job.id;
-    state.dirty = true;
-    updateTarget(job);
-    if (state.playhead === Infinity) state.playhead = state.target;
-  } catch (err) {
-    console.error(err);
-  } finally {
-    state.loading = false;
+    this.listen();
+    requestAnimationFrame((now) => this.tick(now));
   }
-}
 
-async function poll() {
-  try {
-    const resp = await fetch("api/status", { cache: "no-store" });
-    if (!resp.ok) throw new Error(resp.statusText);
-    const st = await resp.json();
-    state.status = st;
-    if (st.print && st.print.id !== state.modelJob) loadModel(st.print);
-    showStatus(st);
-    updateTarget(st.print);
-    showProgressDetails();
-    state.dirty = true;
-  } catch (err) {
-    const badge = $("badge");
-    badge.textContent = "can't reach the server";
-    badge.className = "badge bad";
+  get ok() { return this.renderer !== null; }
+
+  // update takes the latest job, or null, from a status poll.
+  update(job) {
+    this.job = job || null;
+    if (job && job.id !== this.modelJob) this.loadModel(job);
+    this.updateTarget(job);
+    this.dirty = true;
   }
-  setTimeout(poll, POLL_MS);
-}
 
-function showProgressDetails() {
-  const job = state.status && state.status.print;
-  const model = state.model;
-  if (!job || !model) {
-    $("layer").textContent = "–";
-    $("left").textContent = "–";
-    return;
+  // details are the layer and time left at the drawn head.
+  details() {
+    const job = this.job;
+    const model = this.model;
+    if (!job || !model) return { layer: "–", left: "–" };
+    const at = model.at(this.playhead);
+    return {
+      layer: at ? `${job.state === "finished" ? model.layers : at.layer} of ${model.layers}` : "–",
+      left: printing(job) ? `about ${clock(model.seconds - this.playhead)}` : "–",
+    };
   }
-  const at = model.at(state.playhead);
-  $("layer").textContent = at ? `${job.state === "finished" ? model.layers : at.layer} of ${model.layers}` : "–";
-  $("left").textContent = printing(job) ? `about ${clock(model.seconds - state.playhead)}` : "–";
-}
 
-// Glides the drawn head towards where it should be, at the print's own speed, faster if
-// it's behind, and it waits if it's ahead, as a head doesn't print backwards.
-function advance(dt) {
-  const job = state.status && state.status.print;
-  const model = state.model;
-  if (!job || !model) return false;
-  const before = state.playhead;
-  let target = state.target;
-  if (state.coast > 0) {
-    // Between positions from the card, the target keeps going at the print's own speed.
-    const since = (performance.now() - state.updatedAt) / 1000;
-    target += Math.min(since, Math.max(state.coast - job.moved_ago, 0));
-  }
-  target = Math.min(target, model.seconds);
-  const gap = target - state.playhead;
-  if (Math.abs(gap) > SNAP_SECONDS) {
-    state.playhead = target;
-  } else if (gap > 0) {
-    state.playhead = Math.min(state.playhead + dt * (1 + gap / 2), target);
-  }
-  return state.playhead !== before;
-}
-
-function tick(now) {
-  const dt = Math.min((now - state.lastFrame) / 1000 || 0, 0.25);
-  state.lastFrame = now;
-  if (advance(dt) && now - state.lastDraw >= MIN_DRAW_MS) state.dirty = true;
-  if (renderer && state.dirty) {
-    state.dirty = false;
-    state.lastDraw = now;
-    const job = state.status && state.status.print;
-    const model = state.model;
-    const started = job && (job.pos > 0 || job.state === "finished");
-    const head = model && started && job.state !== "finished" ? model.at(state.playhead) : null;
-    renderer.draw({
-      head,
-      all: job && job.state === "finished",
-      showHead: printing(job),
-    });
-  }
-  requestAnimationFrame(tick);
-}
-
-// ---- Mouse and touch ----
-
-if (renderer) {
-  const canvas = $("view");
-  const pointers = new Map();
-  let pinch = 0;
-  let severalFingers = false;
-  let lastTap = 0;
-
-  const zoomTo = (distance) => {
-    renderer.camera.distance = Math.min(Math.max(distance, MIN_DISTANCE), MAX_DISTANCE);
-  };
-  const resetView = () => {
-    renderer.reset();
-    state.dirty = true;
-  };
-
-  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-  canvas.addEventListener("pointerdown", (e) => {
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, button: e.button, startX: e.clientX, startY: e.clientY, at: e.timeStamp });
-    if (pointers.size > 1) severalFingers = true;
-    pinch = 0;
-    canvas.setPointerCapture(e.pointerId);
-  });
-  canvas.addEventListener("pointermove", (e) => {
-    const p = pointers.get(e.pointerId);
-    if (!p) return;
-    const dx = e.clientX - p.x;
-    const dy = e.clientY - p.y;
-    p.x = e.clientX;
-    p.y = e.clientY;
-    const cam = renderer.camera;
-    renderer.moved = true;
-    if (pointers.size >= 2) {
-      const [a, b] = [...pointers.values()];
-      const span = Math.hypot(a.x - b.x, a.y - b.y);
-      if (pinch > 0 && span > 0) zoomTo(cam.distance * (pinch / span));
-      pinch = span;
-      // Each finger's share of moving both together.
-      renderer.pan(dx / 2, dy / 2);
-    } else if (p.button === 2 || p.button === 1 || e.shiftKey) {
-      renderer.pan(dx, dy);
-    } else {
-      // The camera goes the other way, so the near side of the model follows the mouse.
-      cam.yaw -= dx * 0.006;
-      cam.pitch = Math.min(Math.max(cam.pitch + dy * 0.006, -0.1), 1.55);
+  // Sets where the head should be from the job's position.
+  updateTarget(job) {
+    const model = this.model;
+    if (!model || !job) return;
+    if (job.state === "finished") {
+      this.target = model.seconds;
+      this.playhead = model.seconds;
+      return;
     }
-    state.dirty = true;
-  });
-  const lift = (e) => {
-    const p = pointers.get(e.pointerId);
-    pointers.delete(e.pointerId);
-    pinch = 0;
-    if (p && e.type === "pointerup" && e.pointerType === "touch" && !severalFingers &&
-        e.timeStamp - p.at < TAP_MS && Math.hypot(e.clientX - p.startX, e.clientY - p.startY) < TAP_PIXELS) {
-      if (e.timeStamp - lastTap < DOUBLE_TAP_MS) {
-        lastTap = 0;
-        resetView();
+    const index = model.moveAtPos(job.pos);
+    const lag = LAG_MOVES[job.mode] ?? 16;
+    // Nothing has moved yet if the position is still before the first real move.
+    const behind = Math.max(index - lag, 0);
+    let target = job.pos > 0 ? model.time[behind] : 0;
+    this.coast = 0;
+    if (job.mode === "sd" && job.state === "running" && job.pos > 0) {
+      this.coast = SD_COAST_SECONDS;
+      target += Math.min(job.moved_ago, SD_COAST_SECONDS);
+    }
+    this.target = Math.min(target, model.seconds);
+    this.updatedAt = performance.now();
+  }
+
+  async loadModel(job) {
+    if (this.loading || !this.renderer) return;
+    this.loading = true;
+    try {
+      const resp = await fetch(this.modelURL(job.id));
+      if (!resp.ok) {
+        this.model = null;
+        this.modelMissing = true;
+        this.renderer.setModel(null);
       } else {
-        lastTap = e.timeStamp;
+        const model = new Model(await resp.arrayBuffer());
+        this.model = model;
+        this.modelMissing = false;
+        this.renderer.setModel(model);
+        this.renderer.frame(model);
+        this.playhead = Infinity;
       }
+      this.modelJob = job.id;
+      this.dirty = true;
+      this.updateTarget(this.job || job);
+      if (this.playhead === Infinity) this.playhead = this.target;
+    } catch (err) {
+      console.error(err);
+    } finally {
+      this.loading = false;
     }
-    if (pointers.size === 0) severalFingers = false;
-  };
-  canvas.addEventListener("pointerup", lift);
-  canvas.addEventListener("pointercancel", lift);
-  canvas.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    renderer.moved = true;
-    zoomTo(renderer.camera.distance * Math.exp(e.deltaY * 0.001));
-    state.dirty = true;
-  }, { passive: false });
-  canvas.addEventListener("dblclick", resetView);
-  // Safari has its own page zoom, which the view's pinch shouldn't set off.
-  for (const name of ["gesturestart", "gesturechange"]) {
-    canvas.addEventListener(name, (e) => e.preventDefault(), { passive: false });
   }
 
-  // Turning the phone or opening the details changes the view's shape. A view nobody has
-  // moved is framed again to suit, and one they have is left where they put it.
-  new ResizeObserver(() => {
-    if (!renderer.moved) renderer.reset();
-    state.dirty = true;
-  }).observe(canvas);
+  // Glides the drawn head towards where it should be, at the print's own speed, faster if
+  // it's behind, and it waits if it's ahead, as a head doesn't print backwards.
+  advance(dt) {
+    const job = this.job;
+    const model = this.model;
+    if (!job || !model) return false;
+    const before = this.playhead;
+    let target = this.target;
+    if (this.coast > 0) {
+      // Between positions from the card, the target keeps going at the print's own speed.
+      const since = (performance.now() - this.updatedAt) / 1000;
+      target += Math.min(since, Math.max(this.coast - job.moved_ago, 0));
+    }
+    target = Math.min(target, model.seconds);
+    const gap = target - this.playhead;
+    if (Math.abs(gap) > SNAP_SECONDS) {
+      this.playhead = target;
+    } else if (gap > 0) {
+      this.playhead = Math.min(this.playhead + dt * (1 + gap / 2), target);
+    }
+    return this.playhead !== before;
+  }
 
-  // A phone can take the GPU back while the page is in the background, and starting again
-  // is the simple way to rebuild everything on it.
-  canvas.addEventListener("webglcontextlost", (e) => e.preventDefault());
-  canvas.addEventListener("webglcontextrestored", () => location.reload());
+  tick(now) {
+    const dt = Math.min((now - this.lastFrame) / 1000 || 0, 0.25);
+    this.lastFrame = now;
+    if (this.advance(dt) && now - this.lastDraw >= MIN_DRAW_MS) this.dirty = true;
+    if (this.dirty) {
+      this.dirty = false;
+      this.lastDraw = now;
+      const job = this.job;
+      const model = this.model;
+      const started = job && (job.pos > 0 || job.state === "finished");
+      const head = model && started && job.state !== "finished" ? model.at(this.playhead) : null;
+      this.renderer.draw({
+        head,
+        all: job && job.state === "finished",
+        showHead: printing(job),
+      });
+    }
+    requestAnimationFrame((t) => this.tick(t));
+  }
 
-  $("more").addEventListener("click", () => {
-    const open = $("panel").classList.toggle("open");
-    $("more").textContent = open ? "Less" : "Details";
-    $("more").setAttribute("aria-expanded", String(open));
-  });
+  resetView() {
+    this.renderer.reset();
+    this.dirty = true;
+  }
+
+  // ---- Mouse and touch ----
+
+  listen() {
+    const canvas = this.canvas;
+    const renderer = this.renderer;
+    const pointers = new Map();
+    let pinch = 0;
+    let severalFingers = false;
+    let lastTap = 0;
+
+    const zoomTo = (distance) => {
+      renderer.camera.distance = Math.min(Math.max(distance, MIN_DISTANCE), MAX_DISTANCE);
+    };
+
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    canvas.addEventListener("pointerdown", (e) => {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, button: e.button, startX: e.clientX, startY: e.clientY, at: e.timeStamp });
+      if (pointers.size > 1) severalFingers = true;
+      pinch = 0;
+      canvas.setPointerCapture(e.pointerId);
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      const p = pointers.get(e.pointerId);
+      if (!p) return;
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      p.x = e.clientX;
+      p.y = e.clientY;
+      const cam = renderer.camera;
+      renderer.moved = true;
+      if (pointers.size >= 2) {
+        const [a, b] = [...pointers.values()];
+        const span = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinch > 0 && span > 0) zoomTo(cam.distance * (pinch / span));
+        pinch = span;
+        // Each finger's share of moving both together.
+        renderer.pan(dx / 2, dy / 2);
+      } else if (p.button === 2 || p.button === 1 || e.shiftKey) {
+        renderer.pan(dx, dy);
+      } else {
+        // The camera goes the other way, so the near side of the model follows the mouse.
+        cam.yaw -= dx * 0.006;
+        cam.pitch = Math.min(Math.max(cam.pitch + dy * 0.006, -0.1), 1.55);
+      }
+      this.dirty = true;
+    });
+    const lift = (e) => {
+      const p = pointers.get(e.pointerId);
+      pointers.delete(e.pointerId);
+      pinch = 0;
+      if (p && e.type === "pointerup" && e.pointerType === "touch" && !severalFingers &&
+          e.timeStamp - p.at < TAP_MS && Math.hypot(e.clientX - p.startX, e.clientY - p.startY) < TAP_PIXELS) {
+        if (e.timeStamp - lastTap < DOUBLE_TAP_MS) {
+          lastTap = 0;
+          this.resetView();
+        } else {
+          lastTap = e.timeStamp;
+        }
+      }
+      if (pointers.size === 0) severalFingers = false;
+    };
+    canvas.addEventListener("pointerup", lift);
+    canvas.addEventListener("pointercancel", lift);
+    canvas.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      renderer.moved = true;
+      zoomTo(renderer.camera.distance * Math.exp(e.deltaY * 0.001));
+      this.dirty = true;
+    }, { passive: false });
+    canvas.addEventListener("dblclick", () => this.resetView());
+    // Safari has its own page zoom, which the view's pinch shouldn't set off.
+    for (const name of ["gesturestart", "gesturechange"]) {
+      canvas.addEventListener(name, (e) => e.preventDefault(), { passive: false });
+    }
+
+    // Turning the phone or opening the details changes the view's shape. A view nobody has
+    // moved is framed again to suit, and one they have is left where they put it.
+    new ResizeObserver(() => {
+      if (!renderer.moved) renderer.reset();
+      this.dirty = true;
+    }).observe(canvas);
+
+    // A phone can take the GPU back while the page is in the background, and starting again
+    // is the simple way to rebuild everything on it.
+    canvas.addEventListener("webglcontextlost", (e) => e.preventDefault());
+    canvas.addEventListener("webglcontextrestored", () => location.reload());
+  }
 }
-
-poll();
-requestAnimationFrame(tick);

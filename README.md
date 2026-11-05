@@ -1,6 +1,6 @@
 # Tramline
 
-A small print server for an Ender 3 V2, running on a Raspberry Pi. It's a lightweight alternative to OctoPrint: one Go binary with no dependencies that switches the printer's plug, heats, checks the bed's tram and prints. A read-only web page shows the print in 3D.
+A small print server for an Ender 3 V2, running on a Raspberry Pi. It's a lightweight alternative to OctoPrint: one Go binary with no dependencies that switches the printer's plug, heats, checks the bed's tram and prints. `tramline gui` does all of that from a browser on your computer, and a read-only web page on the Pi shows the print in 3D.
 
 The name joins bed **tram**ming with the serial **line** to the printer.
 
@@ -25,6 +25,7 @@ tramline status                                      # is anything running?
 tramline upload part_PETG.gcode                      # save it on the Pi
 tramline print part_PETG.gcode --from pi --bed-clear # the rest happens by itself
 tramline web                                         # watch it in the browser
+tramline gui                                         # or do all of it in the browser
 ```
 
 `print` then does all of this, carrying on if your computer goes away:
@@ -76,6 +77,7 @@ Keep the bed clear until it prints. If any print has started since you scheduled
 | Command | What it does |
 |---|---|
 | `status` | Power, temperatures and the current job |
+| `gui [--no-open] [--port <n>]` | Open the full GUI in a browser, see below. Ctrl-C stops it |
 | `web [--url]` | Open the web page, or just show its address |
 | `power on\|off` | Switch the plug. Off is refused while hot or printing |
 | `preheat [bed] [nozzle]`, `cool` | Heat, by default bed 80 °C and nozzle 150 °C, or turn the heaters off |
@@ -91,6 +93,15 @@ Keep the bed clear until it prints. If any print has started since you scheduled
 | `schedule list [--json]`, `schedule cancel <id>` | List scheduled prints and how recent ones ended, or cancel one that hasn't started printing |
 
 Run `tramline help` for everything, including the options and the commands used on the Pi.
+
+## GUI
+
+`tramline gui` opens a browser with everything the commands above do: files, with uploads by dragging them onto the window, printing and scheduling, cancelling, copying to the card, the plug, preheat and cool, tram checks, the Hue plug and an emergency stop. The print is drawn in 3D, as on the web page.
+
+- **It runs on your computer, not the Pi,** on `127.0.0.1` only, and talks to the Pi with this computer's key, the same way the commands do. The browser never gets the key. Ctrl-C stops it, and anything already sent to the Pi carries on.
+- **It signs the browser in once,** with a link that only works one time. To open it in another browser or after closing it, run `tramline gui` again.
+- **The Pi still decides:** printing, scheduling and tram checks need the "bed is clear" box ticked each time, and the Pi's own rules apply as they do to the commands.
+- **The emergency stop is held** for just over half a second, so a stray click can't set it off.
 
 ## Web page
 
@@ -118,6 +129,7 @@ This runs a print on a simulated printer on this machine, with a throwaway login
 
 ```sh
 ./sim-web.sh [--sd] [--minutes <n>] [--schedule <minutes>] [--lan] [--no-open] <file.gcode>
+./sim-gui.sh [--minutes <n>] [--fail-tram] [--no-open] [--port <n>] [file.gcode ...]   # the GUI, with these files uploaded
 ```
 
 ## Security
@@ -126,4 +138,4 @@ The API uses mutual TLS: each client has its own key, and the Pi keeps a list of
 
 ## More detail
 
-[ENGINEERING-NOTES.md](ENGINEERING-NOTES.md) has the design, firmware findings, test results and open issues, including what has only run on the simulator.
+[notes/](notes/README.md), the engineering notes, have the design, firmware findings, test results and open issues, including what has only run on the simulator.

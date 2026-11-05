@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tramline</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="shared/theme.css">
+<link rel="stylesheet" href="gui.css">
+</head>
+<body>
+<canvas id="view" aria-label="3D view of the print"></canvas>
+<div id="no-webgl" hidden>This browser can't show the 3D view, as WebGL 2 isn't available. Everything else works.</div>
+
+<aside id="side">
+  <header class="top">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h16M6 18V9l6-4 6 4v9M9 18v-5h6v5"/></svg>
+      <h1>Tramline</h1>
+    </div>
+    <span id="badge" class="badge">connecting</span>
+  </header>
+
+  <section id="now" class="card">
+    <p id="file" class="file"></p>
+    <div id="progress-block" hidden>
+      <div class="bar"><div id="bar-fill"></div></div>
+      <dl class="grid four">
+        <div><dt>Progress</dt><dd id="percent"></dd></div>
+        <div><dt>Layer</dt><dd id="layer"></dd></div>
+        <div><dt>Time left</dt><dd id="left"></dd></div>
+        <div><dt>Running for</dt><dd id="elapsed"></dd></div>
+      </dl>
+    </div>
+    <dl class="grid three temps">
+      <div><dt>Nozzle</dt><dd id="nozzle">–</dd></div>
+      <div><dt>Bed</dt><dd id="bed">–</dd></div>
+      <div><dt>Power</dt><dd id="plug">–</dd></div>
+    </dl>
+    <div id="check-card" hidden></div>
+    <p id="message" class="message" hidden></p>
+    <p id="problem" class="problem" hidden></p>
+    <div id="job-actions" class="actions" hidden></div>
+  </section>
+
+  <nav class="tabs" role="tablist">
+    <button type="button" role="tab" data-tab="files" aria-selected="true">Files</button>
+    <button type="button" role="tab" data-tab="printer" aria-selected="false">Printer</button>
+    <button type="button" role="tab" data-tab="schedule" aria-selected="false">Schedule<span id="schedule-count" class="count" hidden></span></button>
+    <button type="button" role="tab" data-tab="more" aria-selected="false">More</button>
+  </nav>
+
+  <div class="panes">
+    <section id="tab-files" class="pane" role="tabpanel">
+      <label id="drop" class="drop" tabindex="0">
+        <input id="file-input" type="file" accept=".gcode,.gco" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0-5 5m5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <span><strong>Drop G-code here</strong> or click to choose a file</span>
+      </label>
+      <div id="upload" class="upload" hidden>
+        <div class="upload-head"><span id="upload-name" class="name"></span><span id="upload-phase" class="hint"></span></div>
+        <div class="bar"><div id="upload-fill"></div></div>
+      </div>
+
+      <div class="list-head">
+        <h2>On the Pi</h2>
+        <button id="files-refresh" type="button" class="icon" title="Refresh the lists" aria-label="Refresh the lists">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>
+        </button>
+      </div>
+      <ul id="pi-files" class="list"><li class="empty">Loading…</li></ul>
+
+      <div class="list-head"><h2>On the SD card</h2></div>
+      <p id="card-note" class="hint" hidden></p>
+      <ul id="card-files" class="list"></ul>
+    </section>
+
+    <section id="tab-printer" class="pane" role="tabpanel" hidden>
+      <div class="block">
+        <h2>Power</h2>
+        <div class="row">
+          <span id="plug-text" class="state-text">–</span>
+          <div class="seg" role="group" aria-label="Plug">
+            <button id="power-on" type="button">On</button>
+            <button id="power-off" type="button">Off</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="block">
+        <h2>Heat</h2>
+        <div class="row fields">
+          <label class="field"><span>Bed</span><input id="pre-bed" type="number" min="0" max="110" step="5" value="80"><em>°C</em></label>
+          <label class="field"><span>Nozzle</span><input id="pre-nozzle" type="number" min="0" max="260" step="5" value="150"><em>°C</em></label>
+        </div>
+        <div class="row buttons">
+          <button id="preheat" type="button" class="btn primary">Preheat</button>
+          <button id="cool" type="button" class="btn">Cool down</button>
+        </div>
+        <p id="heat-note" class="hint" hidden></p>
+      </div>
+
+      <div class="block">
+        <h2>Tram</h2>
+        <div id="tram-view"><p class="hint">No check since the server started.</p></div>
+        <div class="row buttons">
+          <button id="tram-start" type="button" class="btn">Check tram…</button>
+        </div>
+      </div>
+
+      <div class="block">
+        <h2>Printer</h2>
+        <p id="firmware" class="hint">–</p>
+      </div>
+    </section>
+
+    <section id="tab-schedule" class="pane" role="tabpanel" hidden>
+      <div class="row buttons">
+        <button id="schedule-new" type="button" class="btn primary">Schedule a print…</button>
+      </div>
+      <ul id="schedule-list" class="list"><li class="empty">Loading…</li></ul>
+    </section>
+
+    <section id="tab-more" class="pane" role="tabpanel" hidden>
+      <div class="block">
+        <h2>Hue plug</h2>
+        <p class="hint">To pair, press the button on the Hue Bridge, then Pair within 30 seconds. The key stays on the Pi.</p>
+        <div class="row buttons">
+          <button id="hue-pair" type="button" class="btn">Pair</button>
+          <button id="hue-plugs" type="button" class="btn">List plugs</button>
+        </div>
+        <ul id="hue-list" class="list" hidden></ul>
+      </div>
+
+      <div class="block">
+        <h2>Probing settings</h2>
+        <p class="hint">Asks the firmware about probing and the mesh. Nothing moves.</p>
+        <div class="row buttons">
+          <button id="tram-info" type="button" class="btn">Ask the printer</button>
+        </div>
+        <pre id="tram-info-out" class="out" hidden></pre>
+      </div>
+
+      <div class="block">
+        <h2>About</h2>
+        <dl class="about">
+          <dt>This GUI</dt><dd id="about-gui">–</dd>
+          <dt>Server on the Pi</dt><dd id="about-server">–</dd>
+          <dt>Address</dt><dd id="about-address">–</dd>
+        </dl>
+        <p class="hint">The 3D view: drag to turn, right-drag to move, scroll to zoom, double-click to reset. The head's position is worked out from the file, not measured.</p>
+      </div>
+    </section>
+  </div>
+</aside>
+
+<button id="estop" type="button" class="estop" aria-label="Emergency stop: hold to stop the printer and cut its power">
+  <span class="fill" aria-hidden="true"></span>
+  <span class="label"><strong>STOP</strong><small>hold</small></span>
+</button>
+
+<div id="toasts" aria-live="polite"></div>
+<div id="drag-overlay" hidden><div>Drop to upload to the Pi</div></div>
+
+<div id="signed-out" class="blocker" hidden>
+  <div class="card">
+    <h2 id="signed-out-title">Not connected</h2>
+    <p id="signed-out-text"></p>
+  </div>
+</div>
+
+<dialog id="dlg-run">
+  <h2 id="run-title">Print</h2>
+  <label class="field wide"><span>File</span><select id="run-file"></select></label>
+  <fieldset class="choice">
+    <legend>Print from</legend>
+    <label><input type="radio" name="run-from" value="pi"><span><strong>The Pi</strong><small>Sends it line by line. Don't restart the server until it's done.</small></span></label>
+    <label><input type="radio" name="run-from" value="sd"><span><strong>The SD card</strong><small id="run-sd-note">Prints the copy on the card.</small></span></label>
+  </fieldset>
+  <label id="run-when" class="field wide" hidden><span>When, in this computer's timezone</span><input id="run-at" type="datetime-local"></label>
+  <p id="run-steps" class="hint"></p>
+  <label class="confirm"><input id="run-clear" type="checkbox"><span id="run-clear-text">I've checked the bed is clear</span></label>
+  <p id="run-error" class="problem" hidden></p>
+  <div class="dialog-buttons">
+    <button type="button" class="btn" data-close>Cancel</button>
+    <button id="run-go" type="button" class="btn primary" disabled>Start</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-tram">
+  <h2>Check tram</h2>
+  <p class="hint">Probes the four corners. The head crosses the bed low down, at whatever temperature the printer is at now.</p>
+  <div class="row fields">
+    <label class="field"><span>Inset</span><input id="tram-inset" type="number" min="1" max="100" placeholder="default"><em>mm</em></label>
+    <label class="field"><span>Rounds</span><input id="tram-repeat" type="number" min="1" max="10" value="1"></label>
+  </div>
+  <label class="confirm"><input id="tram-clear" type="checkbox"><span>I've checked the bed is clear</span></label>
+  <p id="tram-error" class="problem" hidden></p>
+  <div class="dialog-buttons">
+    <button type="button" class="btn" data-close>Cancel</button>
+    <button id="tram-go" type="button" class="btn primary" disabled>Check</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-confirm">
+  <h2 id="confirm-title"></h2>
+  <p id="confirm-text"></p>
+  <ul id="confirm-list" class="plain" hidden></ul>
+  <div class="dialog-buttons">
+    <button id="confirm-no" type="button" class="btn" data-close>Cancel</button>
+    <button id="confirm-yes" type="button" class="btn primary">OK</button>
+  </div>
+</dialog>
+
+<script src="shared/status.js"></script>
+<script src="shared/view.js"></script>
+<script src="gui.js"></script>
+</body>
+</html>

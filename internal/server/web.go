@@ -2,10 +2,8 @@ package server
 
 import (
 	"bufio"
-	"embed"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -18,6 +16,7 @@ import (
 	"tramline/internal/gcode"
 	"tramline/internal/marlin"
 	"tramline/internal/tram"
+	"tramline/internal/webui"
 )
 
 // The web page is the one thing served without a client certificate, as plain HTTP on
@@ -25,9 +24,6 @@ import (
 // http.Server, so nothing here can reach the API, and it only reads what the server
 // already holds in memory. It never sends the printer or the Hue Bridge anything, so
 // however many browsers are open, a print can't be affected by them.
-
-//go:embed web
-var webRoot embed.FS
 
 // How long a connection may say nothing before it's dropped, while finding out whether
 // it's TLS, and how long the web page's requests may take.
@@ -106,12 +102,9 @@ type webState struct {
 
 // WebHandler returns the web page's routes. Anything else is a 404, including the API.
 func (s *Server) WebHandler() http.Handler {
-	root, err := fs.Sub(webRoot, "web")
-	if err != nil {
-		panic(err)
-	}
 	mux := http.NewServeMux()
-	mux.Handle("GET /", http.FileServerFS(root))
+	mux.Handle("GET /", http.FileServerFS(webui.Page()))
+	mux.Handle("GET /shared/", http.StripPrefix("/shared", http.FileServerFS(webui.Shared())))
 	mux.HandleFunc("GET /api/status", s.handleWebStatus)
 	mux.HandleFunc("GET /api/model/{id}", s.handleWebModel)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

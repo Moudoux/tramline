@@ -14,10 +14,8 @@ import (
 	"log"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -52,6 +50,9 @@ Client:
   tramline status [--json]                       show the printer's status
   tramline web [--url]                           open the read-only status and 3D print
                                                  view in a browser, or just show its address
+  tramline gui [--no-open] [--port <n>]          open the full GUI in a browser: everything
+                                                 the client's commands do, served on this
+                                                 machine only. Ctrl-C stops it
   tramline power on|off                          switch the printer's plug
   tramline preheat [bed] [nozzle]                start heating, default bed 80 C, nozzle 150 C
   tramline cool                                  turn the heaters off
@@ -116,6 +117,8 @@ func main() {
 		err = runStatus(args)
 	case "web":
 		err = runWeb(args)
+	case "gui":
+		err = runGUI(args)
 	case "power":
 		err = runPower(args)
 	case "preheat":
@@ -421,24 +424,8 @@ func runWeb(args []string) error {
 		fmt.Println(address)
 		return nil
 	}
-	// Some browsers stay in the foreground of what starts them, so a launcher still going
-	// after this long is taken to have worked, and it carries on after this exits.
-	launcher := "xdg-open"
-	if runtime.GOOS == "darwin" {
-		launcher = "open"
-	}
-	opener := exec.Command(launcher, address)
-	if err := opener.Start(); err != nil {
+	if err := openBrowser(address); err != nil {
 		return fmt.Errorf("couldn't open a browser, the page is at %s: %w", address, err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- opener.Wait() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			return fmt.Errorf("couldn't open a browser, the page is at %s: %w", address, err)
-		}
-	case <-time.After(webOpenWait):
 	}
 	return nil
 }
