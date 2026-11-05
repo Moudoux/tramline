@@ -4,10 +4,11 @@
 # and everything it makes goes in a temporary folder, including a throwaway client key,
 # so the real login isn't touched. Ctrl-C ends it and removes that.
 #
-#   ./sim-web.sh [--sd] [--minutes <n>] [--no-open] [--lan] [file.gcode]
+#   ./sim-web.sh [--sd] [--minutes <n>] [--schedule <minutes>] [--no-open] [--lan] [file.gcode]
 #
 #   --sd           print from the simulated card, instead of streaming
 #   --minutes <n>  how long the print takes, default 10
+#   --schedule <n> schedule it that many minutes ahead, at least 16, instead of printing now
 #   --no-open      don't open a browser, just show the address
 #   --lan          listen on this machine's network address, not 127.0.0.1, to try it on a phone
 #
@@ -20,6 +21,7 @@ minutes=10
 open=1
 listen=127.0.0.1
 file=
+schedule=
 
 lan_address() {
 	if [ "$(uname -s)" = Darwin ]; then
@@ -33,9 +35,10 @@ while [ $# -gt 0 ]; do
 	case $1 in
 	--sd) sd=1 ;;
 	--minutes) minutes=${2:?--minutes needs a number}; shift ;;
+	--schedule) schedule=${2:?--schedule needs a number}; shift ;;
 	--no-open) open= ;;
 	--lan) listen=$(lan_address) ;;
-	-*) echo "usage: $0 [--sd] [--minutes <n>] [--no-open] [--lan] [file.gcode]" >&2; exit 2 ;;
+	-*) echo "usage: $0 [--sd] [--minutes <n>] [--schedule <minutes>] [--no-open] [--lan] [file.gcode]" >&2; exit 2 ;;
 	*) file=$1 ;;
 	esac
 	shift
@@ -104,12 +107,20 @@ if [ -n "$file" ]; then
 	done
 	# Uploads go by the file's own name, so it has to be one the server accepts.
 	name=$(basename "$file")
+	"$tramline" upload "$file"
+	from=pi
 	if [ -n "$sd" ]; then
-		"$tramline" upload "$file" --sd
-	else
-		"$tramline" upload "$file" --pi-only
+		"$tramline" copy "$name"
+		from=sd
 	fi
-	"$tramline" print "$name" --bed-clear
+	if [ -n "$schedule" ]; then
+		# GNU and BSD date differ, so this goes by the epoch with each one's own flag.
+		then_s=$(($(date +%s) + schedule * 60))
+		at=$(date -d "@$then_s" '+%Y-%m-%d %H:%M' 2>/dev/null || date -r "$then_s" '+%Y-%m-%d %H:%M')
+		"$tramline" schedule "$name" --from "$from" --at "$at" --bed-clear
+	else
+		"$tramline" print "$name" --from "$from" --bed-clear
+	fi
 fi
 
 address=$("$tramline" web --url)

@@ -21,6 +21,8 @@ const (
 	PrintChecking  = "checking"
 	PrintAdjusting = "adjusting"
 	PrintStarting  = "starting"
+	// PrintScheduled ends a tram check made when scheduling, which passed.
+	PrintScheduled = "scheduled"
 
 	// TramBed and TramNozzle match the start G-code, so PETG doesn't ooze while probing.
 	TramBed    = 80
@@ -90,6 +92,9 @@ func (s *Server) beginPrep(job *PrintJob) PrintJob {
 	s.print.sawDone, s.print.halted, s.print.reason = false, "", ""
 	s.print.linkChecked = true
 	s.savePrintJob()
+	if job.ScheduleID != 0 {
+		s.linkScheduleJob(job.ScheduleID, job.ID)
+	}
 	s.startLeg(job.ID)
 	return *job
 }
@@ -147,7 +152,38 @@ func (s *Server) prepareSteps(ctx context.Context, id int, wake <-chan struct{})
 	if !result.Pass {
 		return s.toAdjusting(ctx, id, result, parked, "")
 	}
+	job := s.printJob()
+	if job == nil || job.ID != id {
+		return errPrepGone
+	}
+	if job.PreCheck {
+		return s.finishPreCheck(id, result)
+	}
+	if job.ScheduleID != 0 && !s.scheduleWanted(job.ScheduleID) {
+		s.stopFor("the scheduled print was cancelled")
+		return errPrepStopped
+	}
 	return s.startFile(ctx, id)
+}
+
+// finishPreCheck ends the check made when scheduling. The heaters go off with the job,
+// then closeJob's report to the schedule starts the wait to cut the plug.
+func (s *Server) finishPreCheck(id int, result *tram.Result) error {
+	if err := s.prepCheck(id); err != nil {
+		return err
+	}
+	s.endPrep(PrintScheduled, fmt.Sprintf("tram passed at %.3f mm, turning the printer off until its scheduled time", result.Range))
+	return nil
+}
+
+// stopFor records why a job's stopping before its file starts, for prepare to end it.
+func (s *Server) stopFor(why string) {
+	s.print.mu.Lock()
+	defer s.print.mu.Unlock()
+	if s.print.job != nil {
+		s.print.job.Stopping = true
+	}
+	s.print.reason = why
 }
 
 // prepCheck says whether the job should carry on.
@@ -332,6 +368,18 @@ func (s *Server) toAdjusting(ctx context.Context, id int, result *tram.Result, p
 		return err
 	}
 	job := s.print.job
+	// Nobody is there for a scheduled print to wait for, so it's cancelled, with the
+	// reason recorded.
+	if job.ScheduleID != 0 && !job.PreCheck {
+		job.Stopping = true
+		if result != nil {
+			s.print.reason = fmt.Sprintf("the tram check failed at its scheduled time: range %.3f mm, limit %.2f mm, %s %s", result.Range, tram.Tolerance, result.Action, result.Corner)
+		} else {
+			s.print.reason = "the heater targets changed during its tram check"
+		}
+		s.print.mu.Unlock()
+		return errPrepStopped
+	}
 	job.State, job.Parked, job.Note = PrintAdjusting, parked, note
 	// A cancel from here on ends the job by itself.
 	s.print.leg = 0
@@ -371,7 +419,7 @@ func (s *Server) startFile(ctx context.Context, id int) error {
 		return fmt.Errorf("can't tell whether a print is running: %w", err)
 	}
 	if printing {
-		s.closeJob(PrintUnknown, "another print is running now, so this one didn't start")
+		s.closeJobPower(PrintUnknown, "another print is running now, so this one didn't start", false)
 		s.printStartedElsewhere()
 		return errPrepGone
 	}
@@ -412,6 +460,7 @@ func (s *Server) startFile(ctx context.Context, id int) error {
 	s.savePrintJob()
 	s.startWatcher()
 	s.print.mu.Unlock()
+	s.noteBedUsed()
 	if mode == ModeStream {
 		log.Printf("print %d: tram passed, streaming %s, %d bytes", id, name, size)
 	} else {

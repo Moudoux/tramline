@@ -129,6 +129,15 @@ dd {
 
 .problem { color: var(--bad); }
 
+#scheduled { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+#scheduled h2 { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--muted); }
+#scheduled ul { margin: 0; padding: 0; list-style: none; }
+#scheduled li { padding: 5px 0; overflow-wrap: anywhere; }
+#scheduled .when { display: block; }
+#scheduled .what, #scheduled .why { display: block; font-size: 12px; color: var(--muted); }
+#scheduled li.ended .when { color: var(--muted); }
+#scheduled li.bad .why { color: var(--bad); }
+
 footer {
   margin-top: 12px;
   padding-top: 8px;

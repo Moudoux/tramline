@@ -697,19 +697,12 @@ func TestUploadWorkflowOnSimulator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if files.Mode != server.ModeAuto || len(files.Files) != 1 || files.Files[0].SDState != server.CopyDone ||
+	if len(files.Files) != 1 || files.Files[0].SDState != server.CopyDone ||
 		len(files.Card) != 1 || files.Card[0].Size != rec.Info.SDSize {
 		t.Fatalf("got %+v", files)
 	}
 	if again, err := c.Copy("part.gcode", 0); err != nil || again.Job != nil {
 		t.Fatalf("got %+v, %v", again, err)
-	}
-
-	if err := c.SetMode(server.ModeStream, 0); err != nil {
-		t.Fatal(err)
-	}
-	if settings, err := c.Settings(); err != nil || settings.Mode != server.ModeStream {
-		t.Fatalf("got %+v, %v", settings, err)
 	}
 
 	if err := c.DeleteFile("part.gcode"); err != nil {
@@ -773,17 +766,14 @@ func TestFilesNeedAnAllowedClient(t *testing.T) {
 	if _, err := stranger.PutFile("a.gcode", strings.NewReader("G28"), 3, strings.Repeat("0", 64)); err == nil {
 		t.Fatal("a stranger uploaded a file")
 	}
-	if err := stranger.SetMode(server.ModeStream, 0); err == nil {
-		t.Fatal("a stranger changed the mode")
-	}
 }
 
 func TestPrintWorkflowOnSimulator(t *testing.T) {
 	c, plug, card := simulatedUpload(t, sim.Options{Garbage: true, PrintTime: time.Hour})
 	const name = "tile.gcode"
 	put(t, c, name, "G1 X1\nG1 X2\n")
-	if _, err := c.Print(name, true); err == nil || !strings.Contains(err.Error(), "the plug is off") {
-		t.Fatalf("no power yet: %v", err)
+	if _, err := c.Print(name, server.FromSD, true); err == nil || !strings.Contains(err.Error(), "no verified copy") {
+		t.Fatalf("no copy yet: %v", err)
 	}
 	if err := c.Power(true); err != nil {
 		t.Fatal(err)
@@ -795,10 +785,10 @@ func TestPrintWorkflowOnSimulator(t *testing.T) {
 	waitStatus(t, c, "the copy", func(st server.StatusResponse) bool {
 		return st.Copy != nil && st.Copy.State == server.CopyDone
 	})
-	if _, err := c.Print(name, false); err == nil || !strings.Contains(err.Error(), "bed") {
+	if _, err := c.Print(name, server.FromSD, false); err == nil || !strings.Contains(err.Error(), "bed") {
 		t.Fatalf("no confirmation: %v", err)
 	}
-	job, err := c.Print(name, true)
+	job, err := c.Print(name, server.FromSD, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -824,7 +814,7 @@ func TestPrintWorkflowOnSimulator(t *testing.T) {
 		t.Errorf("timer still set: %v", st.HeatersOffAt)
 	}
 
-	if _, err := c.Print(name, true); err != nil {
+	if _, err := c.Print(name, server.FromSD, true); err != nil {
 		t.Fatal(err)
 	}
 	out, err := c.Estop()
@@ -848,7 +838,7 @@ func TestStreamWorkflowOnSimulator(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitStatus(t, c, "temperatures", func(st server.StatusResponse) bool { return st.Printer.Temps != nil })
-	job, err := c.Print(name, true)
+	job, err := c.Print(name, server.FromPi, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -865,7 +855,7 @@ func TestStreamWorkflowOnSimulator(t *testing.T) {
 		t.Errorf("the card was used: %q", card.Names())
 	}
 
-	if _, err := c.Print(name, true); err != nil {
+	if _, err := c.Print(name, server.FromPi, true); err != nil {
 		t.Fatal(err)
 	}
 	waitStatus(t, c, "the second stream", func(st server.StatusResponse) bool {
@@ -908,7 +898,7 @@ func TestPrintTramLoopOnSimulator(t *testing.T) {
 	if _, err := c.ContinuePrint(); err == nil {
 		t.Fatal("nothing is waiting yet")
 	}
-	if _, err := c.Print(name, true); err != nil {
+	if _, err := c.Print(name, server.FromSD, true); err != nil {
 		t.Fatal(err)
 	}
 	st := waitStatus(t, c, "the failed check", func(st server.StatusResponse) bool {
@@ -963,5 +953,21 @@ func TestDirDefaultsToDotConfig(t *testing.T) {
 	}
 	if dir != "/home/someone/.config/tramline" {
 		t.Fatalf("dir = %q", dir)
+	}
+}
+
+func TestParseTime(t *testing.T) {
+	loc := time.FixedZone("TEST", 3600)
+	want := time.Date(2026, 11, 6, 6, 0, 0, 0, loc)
+	for _, text := range []string{"2026-11-06 06:00", "2026-11-06T06:00", "2026-11-06 06:00:00", "2026-11-06T06:00:00", "2026-11-06T05:00:00Z", "2026-11-06T06:00:00+01:00"} {
+		got, err := ParseTime(text, loc)
+		if err != nil || !got.Equal(want) {
+			t.Errorf("%q: %v, %v", text, got, err)
+		}
+	}
+	for _, text := range []string{"", "6am", "tomorrow", "06:00", "2026-11-06", "2026-13-06 06:00"} {
+		if got, err := ParseTime(text, loc); err == nil {
+			t.Errorf("%q should be refused, got %v", text, got)
+		}
 	}
 }

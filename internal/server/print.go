@@ -27,6 +27,11 @@ const (
 	// link, so whether it finished properly isn't known.
 	PrintUnknown = "unknown"
 
+	// FromPi streams a file from the Pi line by line, and FromSD prints its verified
+	// copy on the card. The user always says which, so nothing decides it silently.
+	FromPi = "pi"
+	FromSD = "sd"
+
 	printFile = "print.json"
 	printBusy = "a print is running, tramline cancel or estop stops it"
 
@@ -66,6 +71,8 @@ type Prints interface {
 // PrintRequest is the body of POST /v1/print.
 type PrintRequest struct {
 	Name string `json:"name"`
+	// From is where the file prints from: FromPi or FromSD.
+	From string `json:"from"`
 	// BedClear confirms nothing is on the bed.
 	BedClear bool `json:"bed_clear"`
 }
@@ -80,6 +87,10 @@ type PrintJob struct {
 	State  string `json:"state"`
 	// Elsewhere means it wasn't started here, such as from the LCD.
 	Elsewhere bool `json:"elsewhere,omitempty"`
+	// ScheduleID is the scheduled print this job belongs to.
+	ScheduleID int `json:"schedule_id,omitempty"`
+	// PreCheck means it's the tram check made when scheduling, so the file doesn't start.
+	PreCheck bool `json:"pre_check,omitempty"`
 	// Pos is the firmware's position in the file, or in a stream the bytes sent, counted
 	// as they would be on the card.
 	Pos  int64 `json:"pos"`
@@ -288,82 +299,119 @@ func (s *Server) handlePrint(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "there's no printer to print on")
 		return
 	}
-	busy := func() string {
-		switch job := s.printJob(); {
-		case job != nil && job.State == PrintAdjusting:
-			return "a print is waiting for the bed to be adjusted, tramline print --continue or tramline cancel"
-		case s.printRunning():
-			return "another print is running"
-		case s.tramRunning():
-			return "a tram run is going"
-		case s.copyRunning():
-			return "a copy to the SD card is going"
-		}
-		return ""
-	}
-	if why := busy(); why != "" {
+	if why := s.printBusy(); why != "" {
 		writeError(w, http.StatusConflict, "refusing to print: "+why)
 		return
 	}
-	s.heat.op.Lock()
-	defer s.heat.op.Unlock()
-	if why := busy(); why != "" {
-		writeError(w, http.StatusConflict, "refusing to print: "+why)
-		return
-	}
-	s.files.mu.Lock()
-	rec, err := s.loadRecord(in.Name)
-	s.files.mu.Unlock()
-	if errors.Is(err, os.ErrNotExist) {
-		writeError(w, http.StatusNotFound, in.Name+" isn't on the server")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	// What isn't verified on the card goes from here, line by line.
-	stream := rec.SDState != CopyDone
-	// M23 would abort a print that's running, so anything unknown refuses.
-	if code, why := s.printerBlocker(r.Context()); why != "" {
+	if code, why := s.checkPrintable(in.Name, in.From); why != "" {
 		writeError(w, code, "refusing to print: "+why)
 		return
 	}
+	// A print needs nothing done by hand, from a printer that's off to one that's off.
 	ctx := context.WithoutCancel(r.Context())
+	s.keepPowerOn()
+	if _, err := s.powerOnAndConnect(ctx, func() bool { return true }); err != nil {
+		writeError(w, http.StatusConflict, "refusing to print: "+err.Error())
+		return
+	}
+	job, code, msg := s.beginPrint(ctx, in.Name, in.From, 0, false)
+	if msg != "" {
+		writeError(w, code, "refusing to print: "+msg)
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
+// checkPrintable makes the checks that don't need the printer, so a mistake is found
+// before anything is switched on.
+func (s *Server) checkPrintable(name, from string) (int, string) {
+	if from != FromPi && from != FromSD {
+		return http.StatusBadRequest, fmt.Sprintf("say where it prints from: from must be %q or %q", FromPi, FromSD)
+	}
+	s.files.mu.Lock()
+	rec, err := s.loadRecord(name)
+	s.files.mu.Unlock()
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return http.StatusNotFound, name + " isn't on the Pi, tramline upload sends it"
+	case err != nil:
+		return http.StatusInternalServerError, err.Error()
+	case from == FromSD && rec.SDState != CopyDone:
+		return http.StatusConflict, fmt.Sprintf("%s has no verified copy on the card, tramline copy %s makes one", name, name)
+	}
+	return 0, ""
+}
+
+// printBusy says what's using the printer, if anything.
+func (s *Server) printBusy() string {
+	switch job := s.printJob(); {
+	case job != nil && job.State == PrintAdjusting:
+		return "a print is waiting for the bed to be adjusted, tramline print --continue or tramline cancel"
+	case s.printRunning():
+		return "another print is running"
+	case s.tramRunning():
+		return "a tram run is going"
+	case s.copyRunning():
+		return "a copy to the SD card is going"
+	}
+	return ""
+}
+
+// beginPrint makes the refusals every job needs, starts the heaters and the job's
+// preparation, and returns straight away. A scheduled print gives its id, and preCheck
+// means this job only checks tram. The message says why it was refused.
+func (s *Server) beginPrint(ctx context.Context, name, from string, scheduleID int, preCheck bool) (PrintJob, int, string) {
+	if why := s.printBusy(); why != "" {
+		return PrintJob{}, http.StatusConflict, why
+	}
+	s.heat.op.Lock()
+	defer s.heat.op.Unlock()
+	if why := s.printBusy(); why != "" {
+		return PrintJob{}, http.StatusConflict, why
+	}
+	if code, why := s.checkPrintable(name, from); why != "" {
+		return PrintJob{}, code, why
+	}
+	s.files.mu.Lock()
+	rec, err := s.loadRecord(name)
+	s.files.mu.Unlock()
+	if err != nil {
+		return PrintJob{}, http.StatusInternalServerError, err.Error()
+	}
+	// M23 would abort a print that's running, so anything unknown refuses.
+	if code, why := s.printerBlocker(ctx); why != "" {
+		return PrintJob{}, code, why
+	}
 	mode, sdName := ModeStream, ""
-	if !stream {
+	if from == FromSD {
 		mode, sdName = ModeSD, rec.SDName
 		listed, err := s.Card.ListSD(ctx)
 		if err != nil {
-			writePrinterError(w, fmt.Errorf("refusing to print: can't read the card: %w", err))
-			return
+			return PrintJob{}, printerErrorCode(err), fmt.Sprintf("can't read the card: %v", err)
 		}
 		found, exists := findOnCard(listed, rec.SDName)
 		switch {
 		case !exists:
-			writeError(w, http.StatusConflict, fmt.Sprintf("refusing to print: %s isn't on the card, tramline copy %s makes one", rec.SDName, in.Name))
-			return
+			return PrintJob{}, http.StatusConflict, fmt.Sprintf("%s isn't on the card, tramline copy %s makes one", rec.SDName, name)
 		case found.Size != rec.Info.SDSize:
-			writeError(w, http.StatusConflict, fmt.Sprintf("refusing to print: %s is %d bytes on the card, it should be %d", rec.SDName, found.Size, rec.Info.SDSize))
-			return
+			return PrintJob{}, http.StatusConflict, fmt.Sprintf("%s is %d bytes on the card, it should be %d", rec.SDName, found.Size, rec.Info.SDSize)
 		}
 	}
 	// The print-done screen would hide the LCD's messages.
 	if err := s.Prints.CloseDoneScreen(ctx); err != nil {
-		writePrinterError(w, err)
-		return
+		return PrintJob{}, printerErrorCode(err), err.Error()
 	}
 	if err := s.startHeating(ctx); err != nil {
-		writePrinterError(w, err)
-		return
+		return PrintJob{}, printerErrorCode(err), err.Error()
 	}
 	now := s.now()
 	job := s.beginPrep(&PrintJob{
-		Name: in.Name, SDName: sdName, Mode: mode, State: PrintHeating,
+		Name: name, SDName: sdName, Mode: mode, State: PrintHeating,
 		Size: rec.Info.SDSize, StartedAt: now, MovedAt: now,
+		ScheduleID: scheduleID, PreCheck: preCheck,
 	})
-	log.Printf("print %d: %s, heating for its tram check", job.ID, in.Name)
-	writeJSON(w, http.StatusOK, job)
+	log.Printf("print %d: %s, heating for its tram check", job.ID, name)
+	return job, http.StatusOK, ""
 }
 
 // beginJob records a new job and starts following it.
@@ -536,6 +584,12 @@ func (s *Server) updatePrint(change func(*PrintJob)) {
 
 // closeJob records how a print ended. It doesn't take the operation lock.
 func (s *Server) closeJob(state, why string) {
+	s.closeJobPower(state, why, true)
+}
+
+// closeJobPower says whether the end of the job lets the printer turn off. It doesn't
+// when another print has taken over.
+func (s *Server) closeJobPower(state, why string, autoOff bool) {
 	s.print.mu.Lock()
 	defer s.print.mu.Unlock()
 	job := s.print.job
@@ -555,6 +609,12 @@ func (s *Server) closeJob(state, why string) {
 	s.savePrintJob()
 	log.Printf("print %d: %s. %s", job.ID, state, why)
 	s.wakeWatcher()
+	if job.ScheduleID != 0 {
+		s.applyJobEnd(job)
+	}
+	if autoOff && jobEndTurnsOff(job) {
+		s.startAutoOff()
+	}
 }
 
 func (s *Server) setPrinting(printing bool) {
@@ -806,13 +866,14 @@ func (s *Server) adoptPrint(ctx context.Context) bool {
 		s.print.mu.Unlock()
 		log.Printf("print %d: still running, at %d of %d bytes", job.ID, st.Pos, st.Size)
 	} else {
-		s.closeJob(PrintUnknown, "another print is running now")
+		s.closeJobPower(PrintUnknown, "another print is running now", false)
 		adopted := s.beginJob(&PrintJob{
 			Name: name, SDName: name, Mode: ModeSD, State: PrintRunning, Elsewhere: true,
 			Pos: st.Pos, Size: st.Size, StartedAt: now, MovedAt: now,
 		})
 		log.Printf("print %d: %s is running, not started from here, at %d of %d bytes", adopted.ID, name, st.Pos, st.Size)
 	}
+	s.noteBedUsed()
 	s.setPrinting(true)
 	s.setOffAt(now.Add(HeatIdleLimit))
 	return true

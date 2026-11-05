@@ -126,7 +126,7 @@ func TestFailedCheckWaitsThenRechecksUntilItPasses(t *testing.T) {
 		what string
 		code int
 	}{
-		{"print", call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`).Code},
+		{"print", call(r.s.handlePrint, `{"name":"`+name+`","from":"sd","bed_clear":true}`).Code},
 		{"preheat", call(r.s.handlePreheat, `{"bed":80,"nozzle":150}`).Code},
 		{"tram", call(r.s.handleTram, `{"bed_clear":true}`).Code},
 		{"power off", call(r.s.handlePower, `{"on":false}`).Code},
@@ -227,7 +227,7 @@ func TestCoolWhileAdjustingCancels(t *testing.T) {
 
 func TestCancelWhileHeatingIsImmediate(t *testing.T) {
 	r, name := printRig(t, sim.Options{HeatRate: 1})
-	if w := call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`); w.Code != http.StatusOK {
+	if w := call(r.s.handlePrint, `{"name":"`+name+`","from":"sd","bed_clear":true}`); w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	if job := r.s.printJob(); job.State != PrintHeating {
@@ -246,7 +246,7 @@ func TestCancelWhileHeatingIsImmediate(t *testing.T) {
 
 func TestCancelDuringACheckFinishesTheStepAndParks(t *testing.T) {
 	r, name := printRig(t, sim.Options{MoveDelay: 150 * time.Millisecond})
-	if w := call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`); w.Code != http.StatusOK {
+	if w := call(r.s.handlePrint, `{"name":"`+name+`","from":"sd","bed_clear":true}`); w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	r.waitFor(t, "the first probe", func() bool { return r.sawCommand("G30") == 1 })
@@ -283,7 +283,7 @@ func TestEstopWhileAdjusting(t *testing.T) {
 
 func TestEstopDuringACheck(t *testing.T) {
 	r, name := printRig(t, sim.Options{MoveDelay: 100 * time.Millisecond})
-	if w := call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`); w.Code != http.StatusOK {
+	if w := call(r.s.handlePrint, `{"name":"`+name+`","from":"sd","bed_clear":true}`); w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	r.waitFor(t, "the first probe", func() bool { return r.sawCommand("G30") == 1 })
@@ -299,7 +299,7 @@ func TestEstopDuringACheck(t *testing.T) {
 
 func TestFailedProbeEndsTheJobWithHeatersOffAndNoParking(t *testing.T) {
 	r, name := printRig(t, sim.Options{FailProbe: 2})
-	if w := call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`); w.Code != http.StatusOK {
+	if w := call(r.s.handlePrint, `{"name":"`+name+`","from":"sd","bed_clear":true}`); w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	job := r.waitPrint(t, PrintFailed)
@@ -314,7 +314,7 @@ func TestFailedProbeEndsTheJobWithHeatersOffAndNoParking(t *testing.T) {
 
 func TestHeatersChangedWhileHeatingWaitsForTheUser(t *testing.T) {
 	r, name := printRig(t, sim.Options{HeatRate: 1})
-	if w := call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`); w.Code != http.StatusOK {
+	if w := call(r.s.handlePrint, `{"name":"`+name+`","from":"sd","bed_clear":true}`); w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	r.waitTargets(t, TramBed, TramNozzle)
@@ -394,7 +394,7 @@ func TestSoakOnlyBeforeAFirstCheckOrAfterCooling(t *testing.T) {
 	k := &knobs{bed: outOfTram}
 	r, name := printRig(t, sim.Options{PrintTime: time.Minute, Bed: k.get})
 	r.s.TramSoak = 200 * time.Millisecond
-	if w := call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`); w.Code != http.StatusOK {
+	if w := call(r.s.handlePrint, `{"name":"`+name+`","from":"sd","bed_clear":true}`); w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	job := r.waitPrint(t, PrintSoaking)
@@ -438,7 +438,7 @@ func TestSoakOnlyBeforeAFirstCheckOrAfterCooling(t *testing.T) {
 func TestCancelDuringASoakIsImmediate(t *testing.T) {
 	r, name := printRig(t, sim.Options{})
 	r.s.TramSoak = time.Hour
-	if w := call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`); w.Code != http.StatusOK {
+	if w := call(r.s.handlePrint, `{"name":"`+name+`","from":"sd","bed_clear":true}`); w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	r.waitPrint(t, PrintSoaking)
@@ -531,7 +531,7 @@ func TestAnotherPrintFromTheLCDEndsAWaitingJob(t *testing.T) {
 
 func TestTemperatureWaitFailsAfterTheLinkDrops(t *testing.T) {
 	r, name := printRig(t, sim.Options{HeatRate: 1})
-	if w := call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`); w.Code != http.StatusOK {
+	if w := call(r.s.handlePrint, `{"name":"`+name+`","from":"sd","bed_clear":true}`); w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	r.s.Printer = func() marlin.Status { return marlin.Status{} }

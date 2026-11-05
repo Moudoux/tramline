@@ -160,11 +160,11 @@ func (c *Client) Cool() (server.CoolResponse, error) {
 	return out, c.doWithin(coolTimeout, http.MethodPost, "/v1/cool", nil, &out)
 }
 
-// Print heats the printer, checks tram and starts a file with a verified copy on the
-// card once that passes. Follow it through Status.
-func (c *Client) Print(name string, bedClear bool) (server.PrintJob, error) {
+// Print turns the printer on if needed, heats it, checks tram and starts a file once that
+// passes, from server.FromPi or server.FromSD. Follow it through Status.
+func (c *Client) Print(name, from string, bedClear bool) (server.PrintJob, error) {
 	var out server.PrintJob
-	return out, c.doWithin(printTimeout, http.MethodPost, "/v1/print", server.PrintRequest{Name: name, BedClear: bedClear}, &out)
+	return out, c.doWithin(printTimeout, http.MethodPost, "/v1/print", server.PrintRequest{Name: name, From: from, BedClear: bedClear}, &out)
 }
 
 // ContinuePrint says the bed has been adjusted, so the print's tram check runs again.
@@ -176,6 +176,42 @@ func (c *Client) ContinuePrint() (server.PrintJob, error) {
 // CancelPrint asks the firmware to stop the print. Follow it through Status.
 func (c *Client) CancelPrint() error {
 	return c.doWithin(coolTimeout, http.MethodPost, "/v1/cancel", nil, nil)
+}
+
+// timeLayouts are the forms a scheduled time can take. A full date is always needed, so
+// what's stored can be read back and checked.
+var timeLayouts = []string{"2006-01-02 15:04", "2006-01-02T15:04", "2006-01-02 15:04:05", "2006-01-02T15:04:05"}
+
+// ParseTime reads a date and time. Without an offset it's in loc, normally this
+// machine's timezone, which may not be the server's.
+func ParseTime(text string, loc *time.Location) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, text); err == nil {
+		return t, nil
+	}
+	for _, layout := range timeLayouts {
+		if t, err := time.ParseInLocation(layout, text, loc); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("%q isn't a date and time, use YYYY-MM-DD HH:MM", text)
+}
+
+// Schedule checks tram now, and on a pass the printer turns off until the print's time.
+func (c *Client) Schedule(name, from string, at time.Time, bedClear bool) (server.ScheduledPrint, error) {
+	var out server.ScheduledPrint
+	return out, c.doWithin(printTimeout, http.MethodPost, "/v1/schedule", server.ScheduleRequest{Name: name, From: from, At: at, BedClear: bedClear}, &out)
+}
+
+// Schedules lists the scheduled prints, soonest first, with the ones that have ended.
+func (c *Client) Schedules() ([]server.ScheduledPrint, error) {
+	var out []server.ScheduledPrint
+	return out, c.do(http.MethodGet, "/v1/schedule", nil, &out)
+}
+
+// CancelSchedule stops a scheduled print that hasn't started printing.
+func (c *Client) CancelSchedule(id int) (server.ScheduledPrint, error) {
+	var out server.ScheduledPrint
+	return out, c.doWithin(coolTimeout, http.MethodPost, fmt.Sprintf("/v1/schedule/%d/cancel", id), nil, &out)
 }
 
 // Estop stops the printer and cuts its power. The answer says what was done.
@@ -250,22 +286,6 @@ func (c *Client) CancelCopy() error {
 // DeleteFile removes a file from the server, and from the card if it went there.
 func (c *Client) DeleteFile(name string) error {
 	return c.do(http.MethodDelete, "/v1/files/"+url.PathEscape(name), nil, nil)
-}
-
-// Settings fetches the server's settings.
-func (c *Client) Settings() (server.Settings, error) {
-	var out server.Settings
-	return out, c.do(http.MethodGet, "/v1/settings", nil, &out)
-}
-
-// SetMode changes what upload does by default. A limit of 0 leaves auto's limit as
-// it is.
-func (c *Client) SetMode(mode string, autoLimit int) error {
-	in := map[string]any{"mode": mode}
-	if autoLimit != 0 {
-		in["auto_limit_minutes"] = autoLimit
-	}
-	return c.do(http.MethodPut, "/v1/settings", in, nil)
 }
 
 func (c *Client) url(path string) string {

@@ -28,7 +28,15 @@ func printRig(t *testing.T, opts sim.Options) (*uploadRig, string) {
 
 func (r *uploadRig) startPrint(t *testing.T, name string) {
 	t.Helper()
-	if w := call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`); w.Code != http.StatusOK {
+	// From where it can, as the choice isn't what most tests are about.
+	from := FromPi
+	r.s.files.mu.Lock()
+	rec, err := r.s.loadRecord(name)
+	r.s.files.mu.Unlock()
+	if err == nil && rec.SDState == CopyDone {
+		from = FromSD
+	}
+	if w := call(r.s.handlePrint, `{"name":"`+name+`","from":"`+from+`","bed_clear":true}`); w.Code != http.StatusOK {
 		t.Fatalf("print: %d %s", w.Code, w.Body)
 	}
 	r.waitFor(t, "the print to get past its tram check", func() bool {
@@ -54,7 +62,7 @@ func TestPrintRefusals(t *testing.T) {
 		want string
 	}{
 		{`{"name":"` + name + `"}`, http.StatusBadRequest, "bed is clear"},
-		{`{"name":"nope.gcode","bed_clear":true}`, http.StatusNotFound, "isn't on the server"},
+		{`{"name":"nope.gcode","from":"pi","bed_clear":true}`, http.StatusNotFound, "isn't on the Pi"},
 		{`{"name":"../x.gcode","bed_clear":true}`, http.StatusBadRequest, "file name"},
 	} {
 		if w := call(r.s.handlePrint, c.body); w.Code != c.code || !strings.Contains(w.Body.String(), c.want) {
@@ -73,7 +81,7 @@ func TestPrintRefusedWhenTheCardDiffers(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.card.Put(rec.SDName, "short")
-	if w := call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "it should be") {
+	if w := call(r.s.handlePrint, `{"name":"`+name+`","from":"sd","bed_clear":true}`); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "it should be") {
 		t.Errorf("%d %s", w.Code, w.Body)
 	}
 }
@@ -100,7 +108,7 @@ func TestOtherCommandsAreRefusedDuringAPrint(t *testing.T) {
 		what string
 		code int
 	}{
-		{"print", call(r.s.handlePrint, `{"name":"`+name+`","bed_clear":true}`).Code},
+		{"print", call(r.s.handlePrint, `{"name":"`+name+`","from":"sd","bed_clear":true}`).Code},
 		{"preheat", call(r.s.handlePreheat, `{"bed":80,"nozzle":150}`).Code},
 		{"tram", call(r.s.handleTram, `{"bed_clear":true}`).Code},
 		{"power off", call(r.s.handlePower, `{"on":false}`).Code},
@@ -284,6 +292,7 @@ func restarted(r *uploadRig, ctx context.Context) *Server {
 	}
 	s.print.every = 10 * time.Millisecond
 	s.print.grace = 50 * time.Millisecond
+	tuneSchedule(s)
 	s.loadPrintJob()
 	r.s = s
 	return s

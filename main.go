@@ -58,28 +58,32 @@ Client:
   tramline tram --bed-clear [--inset <mm>] [--repeat <n>] [--json]
                                                  probe the corners, exit 3 if out of tram
   tramline tram info                             ask the firmware about probing, no movement
-  tramline upload <file> [--sd|--pi-only] [--no-wait] [--window <bytes>]
-                                                 save a file on the Pi, then copy it to
-                                                 the SD card if that's the default mode
-  tramline copy <name> [--no-wait] [--window <bytes>]
-                                                 copy a file on the Pi to the SD card,
-                                                 also how to retry a failed copy
+  tramline upload <path>                         save a file on the Pi, nothing else. Its name
+                                                 there is <file> in the commands below
+  tramline copy <file> [--no-wait] [--window <bytes>]
+                                                 copy a file on the Pi to the SD card, with the
+                                                 printer on, also how to retry a failed copy
   tramline copy --cancel                         stop the running copy
   tramline files [--json]                        list files on the Pi and the SD card
-  tramline files rm <name>                       delete a file, and its copy on the card
-  tramline mode [auto [--limit <minutes>]|sd|stream]
-                                                 show or change what upload does by default:
-                                                 auto copies to SD unless that would take
-                                                 longer than the limit, default 5 minutes
-  tramline print <name> --bed-clear              heat, check tram, then print a file: from the
-                                                 card if it has a verified copy, otherwise
-                                                 line by line from the Pi. Don't restart the
-                                                 server during that, as it can't carry on
+  tramline files rm <file>                       delete a file, and its copy on the card
+  tramline print <file> --from pi|sd --bed-clear
+                                                 turn the printer on if needed, heat, check tram,
+                                                 then print, and turn it off once it's over and
+                                                 cool. From pi sends the file line by line, so
+                                                 don't restart the server. From sd needs a copy
   tramline print --continue                      say the knobs are adjusted, so it checks again
   tramline cancel                                cancel the print: heaters off. From the card
                                                  the head goes home, from the Pi it lifts 5 mm
   tramline estop                                 emergency stop: M112, then cut the plug
-  tramline hue pair                              pair the server with the Hue Bridge
+  tramline schedule <file> --from pi|sd --at "YYYY-MM-DD HH:MM" --bed-clear
+                                                 check tram now, with print --continue if it
+                                                 needs adjusting, turn the printer off, then at
+                                                 that time, in this machine's timezone, power
+                                                 on and check again. A pass prints, a fail
+                                                 cancels, and either way it ends turned off
+  tramline schedule list [--json]                list scheduled prints and how recent ones ended
+  tramline schedule cancel <id>                  cancel one that hasn't started printing
+  tramline hue pair                             pair the server with the Hue Bridge
   tramline hue plugs                             list names and UUIDs on the bridge
 
   tramline version
@@ -126,14 +130,14 @@ func main() {
 		err = runCopy(args)
 	case "files":
 		err = runFiles(args)
-	case "mode":
-		err = runMode(args)
 	case "print":
 		err = runPrint(args)
 	case "cancel":
 		err = runCancel(args)
 	case "estop":
 		err = runEstop(args)
+	case "schedule":
+		err = runSchedule(args)
 	case "hue":
 		err = runHue(args)
 	case "version":
@@ -702,6 +706,9 @@ func runStatus(args []string) error {
 	printTramStatus(os.Stdout, st.Tram)
 	printCopyStatus(os.Stdout, st.Copy)
 	printPrintStatus(os.Stdout, st.Print)
+	for _, p := range st.Scheduled {
+		fmt.Fprintf(os.Stdout, "Scheduled: %d, %s at %s, %s\n", p.ID, p.Name, scheduleTime(p.At), p.State)
+	}
 	return nil
 }
 
@@ -806,6 +813,9 @@ func printPrintStatus(w io.Writer, job *server.PrintJob) {
 	default:
 		fmt.Fprintf(w, "Print:    %s %s\n", job.Name, job.State)
 	}
+	if job.PreCheck && job.FinishedAt == nil {
+		fmt.Fprintf(w, "          This only checks tram for scheduled print %d, and the file won't start now\n", job.ScheduleID)
+	}
 	if job.Stopping {
 		fmt.Fprintln(w, "          being cancelled")
 	}
@@ -818,6 +828,7 @@ func runPrint(args []string) error {
 	fs := flag.NewFlagSet("print", flag.ContinueOnError)
 	bedClear := fs.Bool("bed-clear", false, "confirm nothing is on the bed")
 	again := fs.Bool("continue", false, "the knobs are adjusted, check tram again")
+	from := fs.String("from", "", "pi streams the file from the Pi, sd prints its copy on the card")
 	if len(args) == 1 && args[0] == "--continue" {
 		c, err := loggedIn()
 		if err != nil {
@@ -830,8 +841,8 @@ func runPrint(args []string) error {
 		return nil
 	}
 	path, err := flagsAfter(fs, args)
-	if err != nil || *again {
-		return errors.New("usage: tramline print <name> --bed-clear, or tramline print --continue")
+	if err != nil || *again || path == "" || (*from != server.FromPi && *from != server.FromSD) {
+		return errors.New("usage: tramline print <file> --from pi|sd --bed-clear, or tramline print --continue")
 	}
 	if !*bedClear {
 		return errors.New("refusing to print: check the bed is clear, then add --bed-clear")
@@ -840,15 +851,15 @@ func runPrint(args []string) error {
 	if err != nil {
 		return err
 	}
-	job, err := c.Print(filepath.Base(path), true)
+	job, err := c.Print(filepath.Base(path), *from, true)
 	if err != nil {
 		return err
 	}
 	if job.Mode == server.ModeStream {
-		fmt.Printf("Heating for the tram check, and %s streams from the Pi once that passes. It carries on without this client, but not without the server: tramline status follows it\n", job.Name)
+		fmt.Printf("Heating for the tram check, and %s streams from the Pi once that passes. It carries on without this client, but not without the server, and the printer turns off afterwards: tramline status follows it\n", job.Name)
 		return nil
 	}
-	fmt.Printf("Heating for the tram check, and %s starts from the SD card as %s once that passes. It carries on without this client: tramline status follows it\n", job.Name, job.SDName)
+	fmt.Printf("Heating for the tram check, and %s starts from the SD card as %s once that passes. It carries on without this client, and the printer turns off afterwards: tramline status follows it\n", job.Name, job.SDName)
 	return nil
 }
 
@@ -864,6 +875,108 @@ func runCancel(args []string) error {
 		return err
 	}
 	fmt.Println("Cancelling: heaters off, and the head goes home, or lifts 5 mm if it's streaming. tramline status confirms it")
+	return nil
+}
+
+// scheduleTime always has the date and timezone, so it can't be misread.
+func scheduleTime(t time.Time) string {
+	return t.Local().Format("Mon 2006-01-02 15:04 MST")
+}
+
+func fromWord(from string) string {
+	if from == server.FromSD {
+		return "card"
+	}
+	return "Pi"
+}
+
+func runSchedule(args []string) error {
+	const use = `usage: tramline schedule <file> --from pi|sd --at "YYYY-MM-DD HH:MM" --bed-clear, tramline schedule list [--json], or tramline schedule cancel <id>`
+	if len(args) > 0 && args[0] == "list" {
+		return runScheduleList(args[1:])
+	}
+	if len(args) > 0 && args[0] == "cancel" {
+		if len(args) != 2 {
+			return errors.New(use)
+		}
+		id, err := strconv.Atoi(args[1])
+		if err != nil {
+			return errors.New(use)
+		}
+		c, err := loggedIn()
+		if err != nil {
+			return err
+		}
+		p, err := c.CancelSchedule(id)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Cancelled scheduled print %d, %s at %s\n", p.ID, p.Name, scheduleTime(p.At))
+		return nil
+	}
+	fs := flag.NewFlagSet("schedule", flag.ContinueOnError)
+	at := fs.String("at", "", "when to print, YYYY-MM-DD HH:MM in this machine's timezone")
+	from := fs.String("from", "", "pi streams the file from the Pi, sd prints its copy on the card")
+	bedClear := fs.Bool("bed-clear", false, "confirm nothing is on the bed, and nothing will be until it prints")
+	path, err := flagsAfter(fs, args)
+	if err != nil || path == "" || *at == "" || (*from != server.FromPi && *from != server.FromSD) {
+		return errors.New(use)
+	}
+	if !*bedClear {
+		return errors.New("refusing to schedule: check the bed is clear, then add --bed-clear")
+	}
+	when, err := client.ParseTime(*at, time.Local)
+	if err != nil {
+		return err
+	}
+	c, err := loggedIn()
+	if err != nil {
+		return err
+	}
+	p, err := c.Schedule(filepath.Base(path), *from, when, true)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Scheduled print %d: %s from the %s at %s\n", p.ID, p.Name, fromWord(p.From), scheduleTime(p.At))
+	fmt.Println("Heating and checking tram now, the head will move. If it asks for an adjustment, tramline print --continue checks again. On a pass the printer turns off until then: tramline status follows it")
+	return nil
+}
+
+func runScheduleList(args []string) error {
+	fs := flag.NewFlagSet("schedule list", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "print JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	c, err := loggedIn()
+	if err != nil {
+		return err
+	}
+	prints, err := c.Schedules()
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(prints)
+	}
+	if len(prints) == 0 {
+		fmt.Println("No scheduled prints")
+		return nil
+	}
+	for _, p := range prints {
+		fmt.Printf("%d  %s  %s from the %s  %s\n", p.ID, scheduleTime(p.At), p.Name, fromWord(p.From), p.State)
+		if c := p.Check; c != nil {
+			fmt.Printf("     Check when scheduling: %s, range %.3f mm\n", passWord(c.Pass), c.Range)
+		}
+		if c := p.FinalCheck; c != nil {
+			fmt.Printf("     Check at its time: %s, range %.3f mm\n", passWord(c.Pass), c.Range)
+		}
+		if p.Reason != "" {
+			fmt.Printf("     %s\n", p.Reason)
+		}
+	}
 	return nil
 }
 
@@ -924,19 +1037,10 @@ func fileHash(path string) (string, int64, error) {
 // runUpload saves the file on the Pi unless it's already there, so a retry doesn't
 // send it again. After that, this machine can go away and nothing is lost.
 func runUpload(args []string) error {
-	const use = "usage: tramline upload <file> [--sd|--pi-only] [--no-wait] [--window <bytes>]"
-	fs := flag.NewFlagSet("upload", flag.ContinueOnError)
-	toSD := fs.Bool("sd", false, "copy to the SD card, whatever the default mode")
-	piOnly := fs.Bool("pi-only", false, "only save on the Pi, whatever the default mode")
-	noWait := fs.Bool("no-wait", false, "don't wait for the copy, the server finishes it either way")
-	window := fs.Int("window", 0, "bytes that may be unanswered, for measuring: default is the server's, 1 is one line at a time")
-	path, err := flagsAfter(fs, args)
-	if err != nil {
-		return err
+	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
+		return errors.New("usage: tramline upload <path>")
 	}
-	if path == "" || (*toSD && *piOnly) {
-		return errors.New(use)
-	}
+	path := args[0]
 	c, err := loggedIn()
 	if err != nil {
 		return err
@@ -967,29 +1071,8 @@ func runUpload(args []string) error {
 	}
 	fmt.Printf("%d commands, %d bytes on the card without comments\n", rec.Info.Lines, rec.Info.SDSize)
 
-	estimate := server.CopyEstimate(rec.Info).Round(time.Second)
-	switch {
-	case *toSD:
-	case *piOnly:
-		fmt.Println("Kept on the Pi, not copied to the SD card")
-		return nil
-	default:
-		settings, err := c.Settings()
-		if err != nil {
-			return fmt.Errorf("it's saved on the Pi, but the default mode can't be read: %w", err)
-		}
-		if !settings.CopiesToSD(rec.Info) {
-			if settings.Mode == server.ModeAuto {
-				fmt.Printf("Copying would take about %s, over the %d minute limit\n", estimate, settings.AutoLimit)
-			}
-			fmt.Println("Kept on the Pi for streaming. To copy it anyway: tramline copy", name)
-			return nil
-		}
-	}
-	fmt.Printf("Copying should take about %s\n", estimate)
-	if err := startCopy(c, name, *window, *noWait); err != nil {
-		return fmt.Errorf("%w\nThe file is safe on the Pi, to retry run: tramline copy %s", err, name)
-	}
+	fmt.Printf("To print it from the Pi: tramline print %s --from pi --bed-clear\n", name)
+	fmt.Printf("To print it from the card, copy it first, about %s: tramline copy %s\n", max(server.CopyEstimate(rec.Info).Round(time.Second), time.Second), name)
 	return nil
 }
 
@@ -1112,7 +1195,6 @@ func runFiles(args []string) error {
 }
 
 func printFiles(w io.Writer, out server.FilesResponse) {
-	fmt.Fprintf(w, "Default mode: %s\n", out.Mode)
 	fmt.Fprintln(w, "On the Pi:")
 	if len(out.Files) == 0 {
 		fmt.Fprintln(w, "  nothing")
@@ -1146,40 +1228,4 @@ func printFiles(w io.Writer, out server.FilesResponse) {
 		}
 		fmt.Fprintf(w, "  %-40s %10d bytes  %s\n", f.Name, f.Size, origin)
 	}
-}
-
-func runMode(args []string) error {
-	const use = "usage: tramline mode [auto [--limit <minutes>]|sd|stream]"
-	fs := flag.NewFlagSet("mode", flag.ContinueOnError)
-	limit := fs.Int("limit", 0, "the longest copy auto will wait for, in minutes")
-	mode, err := flagsAfter(fs, args)
-	if err != nil {
-		return err
-	}
-	if (mode != "" && mode != server.ModeAuto && mode != server.ModeSD && mode != server.ModeStream) ||
-		(*limit != 0 && mode != server.ModeAuto) {
-		return errors.New(use)
-	}
-	c, err := loggedIn()
-	if err != nil {
-		return err
-	}
-	if mode != "" {
-		if err := c.SetMode(mode, *limit); err != nil {
-			return err
-		}
-	}
-	settings, err := c.Settings()
-	if err != nil {
-		return err
-	}
-	fmt.Println("Default mode:", settings.Mode)
-	switch settings.Mode {
-	case server.ModeAuto:
-		fmt.Printf("upload copies a file to SD unless that would take over %d minutes, then keeps it on the Pi.\n", settings.AutoLimit)
-		fmt.Println("print streams a file that has no verified copy on the card.")
-	case server.ModeStream:
-		fmt.Println("upload keeps files on the Pi, and print streams them.")
-	}
-	return nil
 }

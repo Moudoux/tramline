@@ -260,11 +260,14 @@ func (s *Server) handleCool(w http.ResponseWriter, r *http.Request) {
 }
 
 func writePrinterError(w http.ResponseWriter, err error) {
-	code := http.StatusBadGateway
+	writeError(w, printerErrorCode(err), err.Error())
+}
+
+func printerErrorCode(err error) int {
 	if errors.Is(err, marlin.ErrNotConnected) {
-		code = http.StatusConflict
+		return http.StatusConflict
 	}
-	writeError(w, code, err.Error())
+	return http.StatusBadGateway
 }
 
 func (s *Server) watchHeaters(ctx context.Context) {

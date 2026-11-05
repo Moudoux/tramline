@@ -31,7 +31,6 @@ const (
 	uploadSpare = 1 << 30
 
 	uploadsDirName = "uploads"
-	settingsFile   = "settings.json"
 
 	// HashHeader carries the SHA-256 of an upload, so damage on the way is caught
 	// and a file the server already has needn't be sent again.
@@ -41,17 +40,11 @@ const (
 	CopyDone    = "verified"
 	CopyFailed  = "failed"
 
-	// ModeSD copies uploads to the printer's card. ModeStream keeps them on the Pi,
-	// to send to the printer line by line as it prints. ModeAuto copies a file only
-	// if that wouldn't take longer than the limit.
+	// ModeSD is a job printing from the printer's card, and ModeStream one sent line by
+	// line from the Pi as it prints.
 	ModeSD     = "sd"
 	ModeStream = "stream"
-	ModeAuto   = "auto"
 
-	// DefaultAutoLimit is the longest copy ModeAuto will wait for, in minutes.
-	DefaultAutoLimit = 5
-	// MaxAutoLimit is 10 hours, longer than any copy could take.
-	MaxAutoLimit = 600
 	// copyBytesPerSecond is the size on the card copied each second, as measured on
 	// the real printer on 2026-11-03 with a sliced file and the default window.
 	copyBytesPerSecond = 14000
@@ -123,7 +116,6 @@ type CopyResponse struct {
 
 // FilesResponse is returned by GET /v1/files.
 type FilesResponse struct {
-	Mode  string       `json:"mode"`
 	Files []FileRecord `json:"files"`
 	// Card is what's on the card, including files from elsewhere. It's nil if that
 	// can't be read right now, and CardNote says why.
@@ -131,28 +123,9 @@ type FilesResponse struct {
 	CardNote string          `json:"card_note,omitempty"`
 }
 
-// Settings are what clients can change without touching the Pi's config.
-type Settings struct {
-	// Mode is what upload does by default, and how print will run.
-	Mode string `json:"mode"`
-	// AutoLimit is the longest copy ModeAuto will wait for, in minutes.
-	AutoLimit int `json:"auto_limit_minutes"`
-}
-
 // CopyEstimate is roughly how long a file takes to copy to the card.
 func CopyEstimate(info gcode.Info) time.Duration {
 	return time.Duration(info.SDSize) * time.Second / copyBytesPerSecond
-}
-
-// CopiesToSD says whether a file goes to the card under these settings.
-func (s Settings) CopiesToSD(info gcode.Info) bool {
-	switch s.Mode {
-	case ModeSD:
-		return true
-	case ModeStream:
-		return false
-	}
-	return CopyEstimate(info) <= time.Duration(s.AutoLimit)*time.Minute
 }
 
 type fileState struct {
@@ -380,6 +353,10 @@ func (s *Server) handleFilePut(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "this file is being streamed to the printer right now")
 		return
 	}
+	if p := s.scheduleUsing(name); p != nil {
+		writeError(w, http.StatusConflict, fmt.Sprintf("scheduled print %d needs this file as it is, tramline schedule cancel %d frees it", p.ID, p.ID))
+		return
+	}
 	s.files.mu.Lock()
 	defer s.files.mu.Unlock()
 	if s.files.job != nil && s.files.job.Name == name && s.files.job.State == CopyRunning {
@@ -449,15 +426,11 @@ func (s *Server) handleFileGet(w http.ResponseWriter, r *http.Request) {
 
 // handleFiles never waits: if the printer is busy, the card's listing is left out.
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.loadSettings()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	out := FilesResponse{Mode: settings.Mode}
+	var out FilesResponse
 	out.Card, out.CardNote = s.readCard(r.Context())
 	s.files.mu.Lock()
 	defer s.files.mu.Unlock()
+	var err error
 	out.Files, err = s.loadRecords()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -702,6 +675,10 @@ func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, printBusy)
 		return
 	}
+	if p := s.scheduleUsing(name); p != nil {
+		writeError(w, http.StatusConflict, fmt.Sprintf("refusing to delete: scheduled print %d needs this file, tramline schedule cancel %d frees it", p.ID, p.ID))
+		return
+	}
 	if s.tramRunning() {
 		writeError(w, http.StatusConflict, "refusing to delete: a tram run is going")
 		return
@@ -768,66 +745,4 @@ func (s *Server) deleteFromCard(ctx context.Context, sdName string) error {
 		return nil
 	}
 	return s.Card.DeleteSD(ctx, sdName)
-}
-
-func (s *Server) loadSettings() (Settings, error) {
-	settings := Settings{Mode: ModeAuto, AutoLimit: DefaultAutoLimit}
-	if s.DataDir == "" {
-		return settings, nil
-	}
-	data, err := os.ReadFile(filepath.Join(s.DataDir, settingsFile))
-	if errors.Is(err, os.ErrNotExist) {
-		return settings, nil
-	}
-	if err != nil {
-		return settings, err
-	}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return settings, fmt.Errorf("the settings are damaged: %w", err)
-	}
-	if settings.AutoLimit == 0 {
-		settings.AutoLimit = DefaultAutoLimit
-	}
-	return settings, nil
-}
-
-func (s *Server) handleSettingsGet(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.loadSettings()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, settings)
-}
-
-func (s *Server) handleSettingsPut(w http.ResponseWriter, r *http.Request) {
-	in, err := s.loadSettings()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	// Whatever the body leaves out stays as it was.
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&in); err != nil || (in.Mode != ModeSD && in.Mode != ModeStream && in.Mode != ModeAuto) {
-		writeError(w, http.StatusBadRequest, `body must be {"mode":"auto"}, {"mode":"sd"} or {"mode":"stream"}, with optional "auto_limit_minutes"`)
-		return
-	}
-	if in.AutoLimit < 1 || in.AutoLimit > MaxAutoLimit {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("auto_limit_minutes must be 1 to %d", MaxAutoLimit))
-		return
-	}
-	if s.DataDir == "" {
-		writeError(w, http.StatusServiceUnavailable, "the server has no data directory")
-		return
-	}
-	data, err := json.MarshalIndent(in, "", "  ")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := writeAtomic(filepath.Join(s.DataDir, settingsFile), append(data, '\n')); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	log.Printf("default mode is now %s, auto limit %d minutes", in.Mode, in.AutoLimit)
-	writeJSON(w, http.StatusOK, in)
 }

@@ -74,7 +74,11 @@ func newUploadRig(t *testing.T, opts sim.Options) *uploadRig {
 	}
 	r.s.print.every = 10 * time.Millisecond
 	r.s.print.grace = 50 * time.Millisecond
+	tuneSchedule(r.s)
 	go r.printer.Run(ctx)
+	// Any print's end now saves as the printer turns off, which mustn't land while the
+	// folder is being removed.
+	t.Cleanup(func() { waitAutoOff(r.s) })
 	r.waitFor(t, "connected", func() bool {
 		st := r.printer.Status()
 		return st.Connected && st.Temps != nil
@@ -617,7 +621,7 @@ func TestFilesListsBothPlaces(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Mode != ModeAuto || len(out.Files) != 1 || len(out.Card) != 1 || out.Card[0].Name != "OTHER.GCO" {
+	if len(out.Files) != 1 || len(out.Card) != 1 || out.Card[0].Name != "OTHER.GCO" {
 		t.Fatalf("got %+v", out)
 	}
 }
@@ -627,27 +631,6 @@ func TestFilesDuringAPrintLeavesOutTheCard(t *testing.T) {
 	w := httptestGet(r.s.handleFiles)
 	if !strings.Contains(w.Body.String(), "print is running") || r.sawCommand("M20") != 0 {
 		t.Fatalf("got %s, %d", w.Body, r.sawCommand("M20"))
-	}
-}
-
-func TestSettingsDefaultAndSurviveARestart(t *testing.T) {
-	dir := t.TempDir()
-	s := &Server{DataDir: dir}
-	w := httptestGet(s.handleSettingsGet)
-	if !strings.Contains(w.Body.String(), `"mode":"auto"`) || !strings.Contains(w.Body.String(), `"auto_limit_minutes":5`) {
-		t.Fatalf("got %s", w.Body)
-	}
-	for _, bad := range []string{`{"mode":"fast"}`, `nope`, `{"mode":"auto","auto_limit_minutes":-1}`, `{"mode":"auto","auto_limit_minutes":601}`} {
-		if w := call(s.handleSettingsPut, bad); w.Code != http.StatusBadRequest {
-			t.Fatalf("%s: got %d", bad, w.Code)
-		}
-	}
-	if w := call(s.handleSettingsPut, `{"mode":"stream"}`); w.Code != http.StatusOK {
-		t.Fatalf("got %d %s", w.Code, w.Body)
-	}
-	w = httptestGet((&Server{DataDir: dir}).handleSettingsGet)
-	if !strings.Contains(w.Body.String(), `"mode":"stream"`) {
-		t.Fatalf("got %s", w.Body)
 	}
 }
 
@@ -704,46 +687,5 @@ func TestCopyWindow(t *testing.T) {
 	}
 	if job := r.waitCopy(t); job.State != CopyDone || job.Window != 1 {
 		t.Fatalf("got %+v", job)
-	}
-}
-
-func TestAutoGoesByTheCopyTime(t *testing.T) {
-	limit5 := Settings{Mode: ModeAuto, AutoLimit: 5}
-	limit60 := Settings{Mode: ModeAuto, AutoLimit: 60}
-	small := gcode.Info{SDSize: 437_799}   // test-esp-jig, took 31 s
-	deck := gcode.Info{SDSize: 4_154_339}  // pi-deck-slide
-	gate := gcode.Info{SDSize: 28_587_006} // stargate_gate
-	for _, tt := range []struct {
-		settings Settings
-		info     gcode.Info
-		want     bool
-	}{
-		{limit5, small, true},
-		{limit5, deck, true},
-		{limit5, gate, false},
-		{limit60, gate, true},
-		{Settings{Mode: ModeSD}, gate, true},
-		{Settings{Mode: ModeStream}, small, false},
-	} {
-		if got := tt.settings.CopiesToSD(tt.info); got != tt.want {
-			t.Errorf("%+v with %d bytes: got %t", tt.settings, tt.info.SDSize, got)
-		}
-	}
-	if got := CopyEstimate(small).Seconds(); got < 25 || got > 40 {
-		t.Errorf("estimate %f s for a copy measured at 31 s", got)
-	}
-}
-
-func TestChangingTheLimitKeepsTheMode(t *testing.T) {
-	s := &Server{DataDir: t.TempDir()}
-	if w := call(s.handleSettingsPut, `{"mode":"auto","auto_limit_minutes":20}`); w.Code != http.StatusOK {
-		t.Fatalf("got %d %s", w.Code, w.Body)
-	}
-	if w := call(s.handleSettingsPut, `{"mode":"sd"}`); w.Code != http.StatusOK {
-		t.Fatalf("got %d %s", w.Code, w.Body)
-	}
-	got, err := s.loadSettings()
-	if err != nil || got.Mode != ModeSD || got.AutoLimit != 20 {
-		t.Fatalf("got %+v, %v", got, err)
 	}
 }

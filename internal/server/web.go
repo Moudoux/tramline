@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -35,6 +36,9 @@ const (
 	webTimeout   = time.Minute
 )
 
+// webEndedSchedules is how many scheduled prints that have ended the page shows.
+const webEndedSchedules = 5
+
 // WebStatus is GET /api/status on the web page. It's a list of its own rather than a
 // StatusResponse, so a field added to the API isn't made public by accident.
 type WebStatus struct {
@@ -45,6 +49,19 @@ type WebStatus struct {
 	Print     *WebPrint     `json:"print,omitempty"`
 	Tramming  bool          `json:"tramming,omitempty"`
 	Copy      *WebCopy      `json:"copy,omitempty"`
+	// Scheduled is the prints still to come, soonest first, then the latest to end.
+	Scheduled []WebSchedule `json:"scheduled,omitempty"`
+}
+
+// WebSchedule is one scheduled print.
+type WebSchedule struct {
+	ID     int       `json:"id"`
+	Name   string    `json:"name"`
+	From   string    `json:"from"`
+	At     time.Time `json:"at"`
+	State  string    `json:"state"`
+	Ended  bool      `json:"ended,omitempty"`
+	Reason string    `json:"reason,omitempty"`
 }
 
 // WebPrint is the running or most recent print.
@@ -137,7 +154,26 @@ func (s *Server) handleWebStatus(w http.ResponseWriter, r *http.Request) {
 	if job := s.copyJob(); job != nil && job.State == CopyRunning {
 		out.Copy = &WebCopy{Name: job.Name, Bytes: job.Bytes, TotalBytes: job.TotalBytes}
 	}
+	out.Scheduled = s.webSchedules()
 	writeJSON(w, http.StatusOK, out)
+}
+
+// webSchedules keeps the page short: all that are to come, and a few that have ended.
+func (s *Server) webSchedules() []WebSchedule {
+	var coming, ended []WebSchedule
+	for _, p := range s.schedulesCopy() {
+		item := WebSchedule{ID: p.ID, Name: p.Name, From: p.From, At: p.At, State: p.State, Ended: p.ended(), Reason: p.Reason}
+		if item.Ended {
+			ended = append(ended, item)
+		} else {
+			coming = append(coming, item)
+		}
+	}
+	slices.Reverse(ended)
+	if len(ended) > webEndedSchedules {
+		ended = ended[:webEndedSchedules]
+	}
+	return append(coming, ended...)
 }
 
 // handleWebModel gives the moves of the current job's file. Only that one can be asked

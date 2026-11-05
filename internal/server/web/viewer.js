@@ -592,6 +592,7 @@ const STATE_TEXT = {
   cancelling: ["cancelling", "bad", "The print is being cancelled."],
   finished: ["finished", "good", ""],
   cancelled: ["cancelled", "", ""],
+  scheduled: ["tram passed, scheduled", "good", ""],
   failed: ["failed", "bad", ""],
   unknown: ["ended, outcome unknown", "", ""],
 };
@@ -610,8 +611,47 @@ function adjustingText(job) {
   return parts.join(" ");
 }
 
+const SCHEDULE_TEXT = {
+  checking: "checking tram now",
+  waiting: "waiting",
+  starting: "starting",
+  printing: "printing",
+};
+const SCHEDULE_BAD = ["failed", "cancelled", "missed", "unknown"];
+
+// In the browser's own timezone, with the date, so it can't be misread.
+function scheduleWhen(at) {
+  return new Date(at).toLocaleString(undefined, {
+    weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZoneName: "short",
+  });
+}
+
+function addSpan(parent, className, text) {
+  const span = document.createElement("span");
+  span.className = className;
+  span.textContent = text;
+  parent.append(span);
+}
+
+function showSchedules(list) {
+  const items = list || [];
+  $("scheduled").hidden = items.length === 0;
+  $("scheduled-list").replaceChildren(...items.map((p) => {
+    const li = document.createElement("li");
+    if (p.ended) li.classList.add("ended");
+    // Asking for a cancel isn't a problem, but anything else that stopped it is worth seeing.
+    if (SCHEDULE_BAD.includes(p.state) && p.reason !== "cancelled on request") li.classList.add("bad");
+    addSpan(li, "when", scheduleWhen(p.at));
+    const from = p.from === "sd" ? "card" : "Pi";
+    addSpan(li, "what", `${p.name}, from the ${from}, ${SCHEDULE_TEXT[p.state] || p.state}`);
+    if (p.reason) addSpan(li, "why", p.reason);
+    return li;
+  }));
+}
+
 function showStatus(st) {
   const job = st.print;
+  showSchedules(st.scheduled);
   const badge = $("badge");
   let text, kind, message = "";
   if (!st.connected && !activeJob(job)) {
@@ -651,7 +691,7 @@ function showStatus(st) {
   $("problem").textContent = job && job.error ? job.error : "";
   $("problem").hidden = !(job && job.error);
 
-  const showProgress = job && job.size > 0 && !["heating", "soaking", "checking", "adjusting", "starting"].includes(job.state);
+  const showProgress = job && job.size > 0 && (job.pos > 0 || printing(job)) && !["heating", "soaking", "checking", "adjusting", "starting", "scheduled"].includes(job.state);
   $("progress-block").hidden = !showProgress;
   if (showProgress) {
     const pct = Math.min((100 * job.pos) / job.size, 100);

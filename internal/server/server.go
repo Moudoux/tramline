@@ -33,6 +33,8 @@ type StatusResponse struct {
 	Copy *CopyJob `json:"copy,omitempty"`
 	// Print is the running or most recent print.
 	Print *PrintJob `json:"print,omitempty"`
+	// Scheduled is the scheduled prints that haven't ended, soonest first.
+	Scheduled []ScheduledPrint `json:"scheduled,omitempty"`
 }
 
 // PlugStatus is the plug's state, or why it couldn't be read.
@@ -86,6 +88,7 @@ type Server struct {
 	tram  tramState
 	files fileState
 	print printState
+	sched scheduleState
 	web   webState
 	ctx   context.Context
 }
@@ -117,8 +120,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/print/continue", s.handlePrintContinue)
 	mux.HandleFunc("POST /v1/cancel", s.handleCancel)
 	mux.HandleFunc("POST /v1/estop", s.handleEstop)
-	mux.HandleFunc("GET /v1/settings", s.handleSettingsGet)
-	mux.HandleFunc("PUT /v1/settings", s.handleSettingsPut)
+	mux.HandleFunc("POST /v1/schedule", s.handleSchedule)
+	mux.HandleFunc("GET /v1/schedule", s.handleScheduleList)
+	mux.HandleFunc("POST /v1/schedule/{id}/cancel", s.handleScheduleCancel)
 	mux.HandleFunc("POST /v1/hue/pair", s.handleHuePair)
 	mux.HandleFunc("GET /v1/hue/plugs", s.handleHuePlugs)
 	return s.requireClient(mux)
@@ -153,6 +157,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Tram:         s.tramJob(),
 		Copy:         s.copyJob(),
 		Print:        s.printJob(),
+		Scheduled:    s.pendingSchedules(),
 	})
 }
 
@@ -210,6 +215,10 @@ func (s *Server) handlePower(w http.ResponseWriter, r *http.Request) {
 	if !*in.On && s.printRunning() {
 		writeError(w, http.StatusConflict, "refusing to cut power: "+printBusy)
 		return
+	}
+	// Someone asking for power outranks a wait to cut it.
+	if *in.On {
+		s.keepPowerOn()
 	}
 	s.heat.op.Lock()
 	defer s.heat.op.Unlock()
@@ -295,6 +304,7 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 func (s *Server) Serve(ctx context.Context, ln net.Listener, tlsCfg *tls.Config) error {
 	s.ctx = ctx
 	s.loadPrintJob()
+	s.loadSchedules()
 	srv := &http.Server{
 		Handler:           s.Handler(),
 		TLSConfig:         tlsCfg,
@@ -312,6 +322,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener, tlsCfg *tls.Config)
 	}
 	if s.Heaters != nil {
 		go s.watchHeaters(ctx)
+	}
+	if s.Prints != nil {
+		go s.watchSchedules(ctx)
 	}
 	tlsConns, plainConns := splitListener(ln)
 	defer ln.Close()
