@@ -487,6 +487,34 @@ func TestStopStreamDoesNotResendTheFile(t *testing.T) {
 	}
 }
 
+// A line error empties the firmware's receive buffer, so a marker sent just before
+// it is gone, and only a new one can end the wait. In CI, a late line of a stopped
+// stream did this to StopStream's resync.
+func TestResyncSendsANewMarkerAfterAFlush(t *testing.T) {
+	link, got := fakeBoard(t, func(line string, write func(string)) {
+		switch {
+		case line == "M118 sync-1":
+			write("Error:Line Number is not Last Line Number+1, Last Line: 4")
+			write("Resend: 5")
+			write("ok")
+		case strings.HasPrefix(line, "M118 "):
+			write(strings.TrimPrefix(line, "M118 "))
+			write("ok")
+		default:
+			write("ok")
+		}
+	})
+	link.stale = true
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := link.Exchange(ctx, "M104 S0", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"M118 sync-1", "M118 sync-2", "M104 S0"}; !slices.Equal(got(), want) {
+		t.Errorf("sent %q, want %q", got(), want)
+	}
+}
+
 // On the real printer, a restart during a stream lost M115's first line, then waited a
 // whole minute to ask again, with the heaters on.
 func TestHandshakeAsksAgainIfTheFirmwareLineWasDamaged(t *testing.T) {

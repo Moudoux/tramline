@@ -420,16 +420,30 @@ func (l *Link) resync(ctx context.Context) error {
 	return l.resyncWithin(ctx, replyIdle)
 }
 
+// resyncWithin is resync, failing after idle without a reply.
+//
+// A line error empties the firmware's receive buffer, which may hold the marker,
+// so its echo would never come. A request to resend means that happened, and a new
+// marker goes. Only a marker can be sent twice like this: anything before the echo
+// of the newest one is old, including an earlier marker that did survive.
 func (l *Link) resyncWithin(ctx context.Context, idle time.Duration) error {
-	l.syncs++
-	marker := fmt.Sprintf("sync-%d", l.syncs)
-	_, _, err := l.send(ctx, "M118 "+marker, idle, func(lines []string) bool {
-		return slices.Contains(lines, marker)
-	})
-	if err == nil {
-		l.stale = false
+	for range sdMaxStuck {
+		l.syncs++
+		marker := fmt.Sprintf("sync-%d", l.syncs)
+		lines, _, err := l.send(ctx, "M118 "+marker, idle, func(lines []string) bool {
+			_, flushed := resendLine(lines)
+			return flushed || slices.Contains(lines, marker)
+		})
+		if err != nil {
+			return err
+		}
+		if slices.Contains(lines, marker) {
+			l.stale = false
+			return nil
+		}
+		log.Printf("the printer emptied its input, so %q may be lost: %q", marker, lines)
 	}
-	return err
+	return fmt.Errorf("the printer emptied its input %d times in a row", sdMaxStuck)
 }
 
 func (l *Link) send(ctx context.Context, cmd string, idle time.Duration, accept func([]string) bool) ([]string, time.Duration, error) {
