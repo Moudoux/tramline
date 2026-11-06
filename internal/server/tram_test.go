@@ -28,6 +28,7 @@ type fakeProber struct {
 	gate    chan struct{}
 	entered chan string
 	info    []string
+	mesh    []string
 	during  func(call string)
 }
 
@@ -73,6 +74,7 @@ func (p *fakeProber) Probe(_ context.Context, x, y int) (tram.Reading, error) {
 	return tram.Reading{X: float64(x), Y: float64(y), Z: z}, nil
 }
 func (p *fakeProber) TramInfo(context.Context) ([]string, error) { return p.info, nil }
+func (p *fakeProber) MeshInfo(context.Context) ([]string, error) { return p.mesh, nil }
 
 func (p *fakeProber) got() []string {
 	p.mu.Lock()
@@ -253,6 +255,53 @@ func TestStatusAnswersDuringAMove(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("status waited for the move")
+	}
+}
+
+// The phase and target let a browser draw the head, and step_seconds times it
+// without the browser's clock having to agree with the server's.
+func TestStatusGivesPhaseAndTarget(t *testing.T) {
+	r, p, release := gated(t)
+	r.s.Printer = r.printer.Status
+	r.startTram(t, bedClear)
+	type seen struct {
+		phase   string
+		target  TramTarget
+		seconds float64
+	}
+	var got []seen
+	for range 6 {
+		<-p.entered
+		r.advance(1500 * time.Millisecond)
+		job := r.s.tramJob()
+		s := seen{phase: job.Phase, seconds: job.StepSeconds}
+		if job.Target != nil {
+			s.target = *job.Target
+		}
+		got = append(got, s)
+		p.gate <- struct{}{}
+	}
+	release()
+	want := []seen{
+		{TramHoming, TramTarget{}, 1.5},
+		{TramProbing, TramTarget{Corner: "front-left", X: 25, Y: 25}, 1.5},
+		{TramProbing, TramTarget{Corner: "front-right", X: 205, Y: 25}, 1.5},
+		{TramProbing, TramTarget{Corner: "back-right", X: 205, Y: 205}, 1.5},
+		{TramProbing, TramTarget{Corner: "back-left", X: 25, Y: 205}, 1.5},
+		{TramParking, TramTarget{X: 115, Y: 115, Z: 30}, 1.5},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+	job := r.waitTram(t)
+	if job.Phase != "" || job.Target != nil || job.StepSeconds != 0 {
+		t.Fatalf("a finished run still reports motion: %+v", job)
+	}
+	out, _ := json.Marshal(job)
+	for _, key := range []string{`"phase"`, `"target"`, `"step_seconds"`} {
+		if strings.Contains(string(out), key) {
+			t.Fatalf("the finished run's JSON, kept in the history, has %s: %s", key, out)
+		}
 	}
 }
 
@@ -472,6 +521,33 @@ func TestUnwritableHistoryDoesNotFailTheRun(t *testing.T) {
 	r.startTram(t, bedClear)
 	if job := r.waitTram(t); job.State != TramDone {
 		t.Fatalf("got %+v", job)
+	}
+}
+
+func TestMeshInfo(t *testing.T) {
+	r, p := newTramRig()
+	p.mesh = []string{"", "Bed Topography Report for CSV:", "", "0.1\t0.2", "0.3\tNAN", "Mesh is invalid", "Storage slot: 0", "echo:Bed Leveling OFF", "ok"}
+	w := httptestGet(r.s.handleMeshInfo)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d %s", w.Code, w.Body)
+	}
+	var got MeshInfo
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	// The front row comes first, and it's printed last.
+	if got.Mesh == nil || len(got.Mesh.Z) != 2 || *got.Mesh.Z[0][0] != 0.3 || got.Mesh.Z[0][1] != nil || got.Mesh.Valid {
+		t.Fatalf("got %s", w.Body)
+	}
+	p.mesh = []string{"echo:Unknown command: \"M420 V1 T1\"", "ok"}
+	w = httptestGet(r.s.handleMeshInfo)
+	got = MeshInfo{}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK || got.Mesh != nil || got.ParseError == "" || len(got.Lines) != 2 {
+		t.Fatalf("unreadable reply: %d %s", w.Code, w.Body)
+	}
+	r.plug.on = false
+	if w := httptestGet(r.s.handleMeshInfo); w.Code != http.StatusConflict {
+		t.Fatalf("plug off: %d %s", w.Code, w.Body)
 	}
 }
 

@@ -35,6 +35,8 @@ type Prober interface {
 	Probe(ctx context.Context, x, y int) (tram.Reading, error)
 	Park(ctx context.Context) error
 	TramInfo(ctx context.Context) ([]string, error)
+	// MeshInfo asks for the mesh the firmware holds, and moves nothing.
+	MeshInfo(ctx context.Context) ([]string, error)
 }
 
 // TramRequest is the body of POST /v1/tram.
@@ -49,6 +51,23 @@ type TramRequest struct {
 type TramRound struct {
 	Readings []tram.Reading `json:"readings"`
 	Result   *tram.Result   `json:"result,omitempty"`
+}
+
+// The phases of a run, for drawing the head. Step says the same as text, for the CLI.
+const (
+	TramHoming  = "homing"
+	TramProbing = "probing"
+	TramParking = "parking"
+)
+
+// TramTarget is where the current phase is going. For probing it's the point being
+// probed, where the probe touches, not the nozzle, which is the probe's offset away.
+// For parking it's where the nozzle stops. Homing has none.
+type TramTarget struct {
+	Corner string  `json:"corner,omitempty"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Z      float64 `json:"z,omitempty"`
 }
 
 // TramJob is one tramming run, and is what status reports.
@@ -66,11 +85,23 @@ type TramJob struct {
 	Error      string       `json:"error,omitempty"`
 	StartedAt  time.Time    `json:"started_at"`
 	FinishedAt *time.Time   `json:"finished_at,omitempty"`
+
+	// Phase, Target and StepSeconds say what the head is doing while a run goes.
+	// StepSeconds is how long the phase has run, by the server's clock, when status was
+	// read, so a browser can time the motion without its clock agreeing with the Pi's.
+	Phase       string      `json:"phase,omitempty"`
+	Target      *TramTarget `json:"target,omitempty"`
+	StepSeconds float64     `json:"step_seconds,omitempty"`
+	stepStarted time.Time
 }
 
 // clone copies everything status could see change while it's being sent.
 func (j *TramJob) clone() *TramJob {
 	out := *j
+	if j.Target != nil {
+		target := *j.Target
+		out.Target = &target
+	}
 	out.Rounds = slices.Clone(j.Rounds)
 	for i := range out.Rounds {
 		out.Rounds[i].Readings = slices.Clone(out.Rounds[i].Readings)
@@ -90,7 +121,11 @@ func (s *Server) tramJob() *TramJob {
 	if s.tram.job == nil {
 		return nil
 	}
-	return s.tram.job.clone()
+	out := s.tram.job.clone()
+	if out.Phase != "" {
+		out.StepSeconds = max(s.now().Sub(out.stepStarted).Seconds(), 0)
+	}
+	return out
 }
 
 func (s *Server) tramRunning() bool {
@@ -208,7 +243,7 @@ func (s *Server) tramGuard(start marlin.Temps) error {
 // tramStep runs one printer command with the operation lock held only for that
 // command, so cool and the idle check get their turn between steps. The firmware
 // couldn't act on them sooner anyway, as it runs commands in order.
-func (s *Server) tramStep(name string, start *marlin.Temps, step func() error) error {
+func (s *Server) tramStep(name, phase string, target *TramTarget, start *marlin.Temps, step func() error) error {
 	s.heat.op.Lock()
 	defer s.heat.op.Unlock()
 	if start != nil {
@@ -216,12 +251,15 @@ func (s *Server) tramStep(name string, start *marlin.Temps, step func() error) e
 			return err
 		}
 	}
-	s.updateTram(func(j *TramJob) { j.Step = name })
+	now := s.now()
+	s.updateTram(func(j *TramJob) {
+		j.Step, j.Phase, j.Target, j.stepStarted = name, phase, target, now
+	})
 	return step()
 }
 
 func (s *Server) tramSequence(ctx context.Context, inset, repeat int, start marlin.Temps) error {
-	if err := s.tramStep("homing", &start, func() error { return s.Prober.Home(ctx) }); err != nil {
+	if err := s.tramStep("homing", TramHoming, nil, &start, func() error { return s.Prober.Home(ctx) }); err != nil {
 		return err
 	}
 	points := tram.Points(inset)
@@ -231,7 +269,8 @@ func (s *Server) tramSequence(ctx context.Context, inset, repeat int, start marl
 		var z [4]float64
 		for _, pt := range points {
 			var reading tram.Reading
-			err := s.tramStep("probing "+pt.Corner.String(), &start, func() (err error) {
+			target := &TramTarget{Corner: pt.Corner.String(), X: float64(pt.X), Y: float64(pt.Y)}
+			err := s.tramStep("probing "+pt.Corner.String(), TramProbing, target, &start, func() (err error) {
 				reading, err = s.Prober.Probe(ctx, pt.X, pt.Y)
 				return err
 			})
@@ -273,7 +312,8 @@ func (s *Server) runTram(inset, repeat int, start marlin.Temps) error {
 	seqErr := s.tramSequence(ctx, inset, repeat, start)
 	err, parked := seqErr, false
 	if err == nil || errors.Is(err, errTargetsChanged) || errors.Is(err, errPrepStopped) {
-		parkErr := s.tramStep("parking", nil, func() error { return s.Prober.Park(ctx) })
+		park := &TramTarget{X: marlin.ParkXY, Y: marlin.ParkXY, Z: marlin.ParkZ}
+		parkErr := s.tramStep("parking", TramParking, park, nil, func() error { return s.Prober.Park(ctx) })
 		parked = parkErr == nil
 		if parkErr != nil {
 			err = errors.Join(err, fmt.Errorf("parking: %w", parkErr))
@@ -281,7 +321,7 @@ func (s *Server) runTram(inset, repeat int, start marlin.Temps) error {
 	}
 	now := s.now()
 	s.updateTram(func(j *TramJob) {
-		j.Step = ""
+		j.Step, j.Phase, j.Target = "", "", nil
 		j.Parked = parked
 		j.FinishedAt = &now
 		j.State = TramDone
@@ -329,32 +369,67 @@ func (s *Server) saveTramHistory() {
 // handleTramInfo returns the firmware's raw answers about probing. It's a fixed
 // list of commands that don't move anything, and not a way to send arbitrary ones.
 func (s *Server) handleTramInfo(w http.ResponseWriter, r *http.Request) {
+	lines, ok := s.askPrinter(w, r, func(ctx context.Context) ([]string, error) { return s.Prober.TramInfo(ctx) })
+	if ok {
+		writeJSON(w, http.StatusOK, lines)
+	}
+}
+
+// MeshInfo is the body of GET /v1/mesh.
+type MeshInfo struct {
+	// Lines are the firmware's reply, as it came.
+	Lines []string `json:"lines"`
+	// Mesh is the reply read, or nil if it couldn't be, with ParseError saying why.
+	Mesh       *marlin.MeshReport `json:"mesh,omitempty"`
+	ParseError string             `json:"parse_error,omitempty"`
+}
+
+// handleMeshInfo returns the mesh the firmware holds now, from one command that only
+// prints (marlin.MeshCommand). After power-on that's the one loaded from the printer's
+// storage at boot, not the last print's, as the plug is cut after every print.
+func (s *Server) handleMeshInfo(w http.ResponseWriter, r *http.Request) {
+	lines, ok := s.askPrinter(w, r, func(ctx context.Context) ([]string, error) { return s.Prober.MeshInfo(ctx) })
+	if !ok {
+		return
+	}
+	out := MeshInfo{Lines: lines}
+	if m, err := marlin.ParseMeshReport(lines); err != nil {
+		out.ParseError = err.Error()
+	} else {
+		out.Mesh = &m
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// askPrinter runs a read-only question when nothing else is using the printer, and
+// writes the error and returns false if it can't.
+func (s *Server) askPrinter(w http.ResponseWriter, r *http.Request, ask func(context.Context) ([]string, error)) ([]string, bool) {
 	if s.Prober == nil {
 		writeError(w, http.StatusServiceUnavailable, "there's no printer to ask")
-		return
+		return nil, false
 	}
 	if s.tramRunning() {
 		writeError(w, http.StatusConflict, "a tram run is going")
-		return
+		return nil, false
 	}
 	if s.copyRunning() {
 		writeError(w, http.StatusConflict, copyBusy)
-		return
+		return nil, false
 	}
 	s.heat.op.Lock()
 	defer s.heat.op.Unlock()
 	if s.copyRunning() {
 		writeError(w, http.StatusConflict, copyBusy)
-		return
+		return nil, false
 	}
 	if code, why := s.printerBlocker(r.Context()); why != "" {
 		writeError(w, code, why)
-		return
+		return nil, false
 	}
-	lines, err := s.Prober.TramInfo(context.WithoutCancel(r.Context()))
+	lines, err := ask(context.WithoutCancel(r.Context()))
 	if err != nil {
 		writePrinterError(w, err)
-		return
+		return nil, false
 	}
-	writeJSON(w, http.StatusOK, lines)
+	return lines, true
 }

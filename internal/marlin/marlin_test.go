@@ -544,6 +544,27 @@ func TestReconnectsAfterDropMidProbe(t *testing.T) {
 	}
 }
 
+func TestMeshInfoOnlyAsksForTheMap(t *testing.T) {
+	var cmds seen
+	p := connectedShort(t, sim.Options{Seen: cmds.add})
+	lines, err := p.MeshInfo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := ParseMeshReport(lines)
+	if err != nil {
+		t.Fatalf("%v: %q", err, lines)
+	}
+	if !r.Valid || len(r.Z) != 5 || r.Z[0][0] == nil {
+		t.Errorf("got %+v", r)
+	}
+	for _, cmd := range cmds.got() {
+		if strings.HasPrefix(cmd, "G") || (strings.HasPrefix(cmd, "M420") && cmd != MeshCommand) {
+			t.Errorf("sent %s", cmd)
+		}
+	}
+}
+
 func TestTramInfoMovesNothing(t *testing.T) {
 	var cmds seen
 	p := connectedShort(t, sim.Options{Seen: cmds.add})

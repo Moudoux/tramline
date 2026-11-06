@@ -738,6 +738,10 @@ func (s *Server) autoOff(ctx context.Context, run int) {
 			s.heatersOff()
 		}
 	}
+	// The print's own mesh is only in the firmware until the plug is cut.
+	if current() && !s.printRunning() {
+		s.readPrintMesh(ctx)
+	}
 	s.heat.op.Unlock()
 
 	for ctx.Err() == nil {

@@ -53,10 +53,10 @@ type Printer struct {
 	// StreamNudge is how long a stream waits for an "ok" before sending the next line
 	// anyway. Zero means DefaultStreamNudge. Set it before Run.
 	StreamNudge time.Duration
-	// OnLine is told when a print finishes, the LCD's stop is pressed or the firmware
-	// halts, whether or not a
-	// command is waiting. It runs on the read loop, so it must return quickly and not
-	// use the printer. Set it before Run.
+	// OnLine is told when a print finishes, the LCD's stop is pressed, the firmware
+	// halts or G29 starts a point of the mesh, whether or not a command is waiting. It
+	// runs on the read loop, so it must return quickly and not use the printer. Set it
+	// before Run.
 	OnLine func(string)
 
 	mu     sync.Mutex

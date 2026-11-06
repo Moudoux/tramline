@@ -36,10 +36,14 @@ const (
 	// How far a reported probe position may be from the one asked for.
 	probeTolerance = 0.1
 	infoIdle       = 10 * time.Second
-	parkZ          = 30
-	parkXY         = 115
 	parkZFeed      = 600
 	parkXYFeed     = 3000
+)
+
+// Where Park leaves the nozzle: raised, over the middle of the bed.
+const (
+	ParkZ  = 30
+	ParkXY = 115
 )
 
 // move sends one command that can take a while, and fails on any "Error:" line.
@@ -99,8 +103,8 @@ func (p *Printer) Probe(ctx context.Context, x, y int) (tram.Reading, error) {
 func (p *Printer) Park(ctx context.Context) error {
 	for _, cmd := range []string{
 		"G90",
-		fmt.Sprintf("G0 Z%d F%d", parkZ, parkZFeed),
-		fmt.Sprintf("G0 X%d Y%d F%d", parkXY, parkXY, parkXYFeed),
+		fmt.Sprintf("G0 Z%d F%d", ParkZ, parkZFeed),
+		fmt.Sprintf("G0 X%d Y%d F%d", ParkXY, ParkXY, parkXYFeed),
 		"M400",
 	} {
 		if _, err := p.move(ctx, cmd, p.Motion.Park); err != nil {

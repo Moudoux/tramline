@@ -232,6 +232,12 @@ func (c *Client) TramInfo() ([]string, error) {
 	return out, c.do(http.MethodGet, "/v1/tram/info", nil, &out)
 }
 
+// MeshInfo fetches the mesh the firmware holds now.
+func (c *Client) MeshInfo() (server.MeshInfo, error) {
+	var out server.MeshInfo
+	return out, c.do(http.MethodGet, "/v1/mesh", nil, &out)
+}
+
 // HuePair asks the server to pair with the bridge. The key stays on the server.
 func (c *Client) HuePair() error {
 	return c.do(http.MethodPost, "/v1/hue/pair", nil, nil)

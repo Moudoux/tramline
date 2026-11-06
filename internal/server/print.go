@@ -109,6 +109,12 @@ type PrintJob struct {
 	Checks int          `json:"checks,omitempty"`
 	// Parked means the head is parked for adjusting.
 	Parked bool `json:"parked,omitempty"`
+	// Mesh is how far the file's G29 has got in probing the mesh, if the firmware has
+	// said. Heard from streams and prints from the card alike.
+	Mesh *MeshProgress `json:"mesh,omitempty"`
+	// MeshRead is the mesh read from the firmware just after the print, while that
+	// print's G29 mesh is still in it. See readPrintMesh.
+	MeshRead *MeshRead `json:"mesh_read,omitempty"`
 	// Stopping means a cancel is waiting for the current step to finish.
 	Stopping   bool       `json:"stopping,omitempty"`
 	Note       string     `json:"note,omitempty"`
@@ -116,6 +122,137 @@ type PrintJob struct {
 	StartedAt  time.Time  `json:"started_at"`
 	MovedAt    time.Time  `json:"moved_at"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
+}
+
+// MeshProgress is from the firmware's "Probing mesh point N/M." lines, printed as each
+// point starts, before the head moves there. Which point of the grid N is isn't said, and
+// nor are the heights, so a view has to work the place out. See notes/probe-view.md.
+type MeshProgress struct {
+	Point     int       `json:"point"`
+	Of        int       `json:"of"`
+	StartedAt time.Time `json:"started_at"`
+	PointAt   time.Time `json:"point_at"`
+	// PointSeconds is how long ago Point started, by the server's clock, when status was
+	// read, so a browser can time the head without its clock agreeing with the Pi's.
+	PointSeconds float64 `json:"point_seconds,omitempty"`
+}
+
+// MeshRead is a mesh read after a print, or why it couldn't be.
+type MeshRead struct {
+	ReadAt time.Time          `json:"read_at"`
+	Mesh   *marlin.MeshReport `json:"mesh,omitempty"`
+	Error  string             `json:"error,omitempty"`
+}
+
+// meshHistoryFile has a line for each mesh read after a print, with the print's ID, name
+// and route, as the Pi's journal doesn't survive a reboot.
+const meshHistoryFile = "mesh-history.jsonl"
+
+// wantsMeshRead says whether the job's own G29 finished, so the firmware holds that
+// print's mesh until the plug is cut. A failed print may have halted the board, which
+// then answers nothing.
+func wantsMeshRead(job *PrintJob) bool {
+	m := job.Mesh
+	return job.MeshRead == nil && m != nil && m.Point == m.Of && !job.Elsewhere &&
+		(job.State == PrintFinished || job.State == PrintCancelled)
+}
+
+// readPrintMesh reads the mesh after a print that probed one, before the plug is cut.
+// It's only a read (marlin.MeshCommand), so it changes nothing for the print or the
+// next one. It's called by autoOff with the operation lock held.
+func (s *Server) readPrintMesh(ctx context.Context) {
+	job := s.printJob()
+	if job == nil || !wantsMeshRead(job) || s.Prober == nil {
+		return
+	}
+	if st := s.Printer(); !st.Connected {
+		return
+	}
+	read := &MeshRead{}
+	ask, cancel := context.WithTimeout(ctx, 30*time.Second)
+	lines, err := s.Prober.MeshInfo(ask)
+	cancel()
+	if err == nil {
+		var m marlin.MeshReport
+		if m, err = marlin.ParseMeshReport(lines); err == nil {
+			read.Mesh = &m
+		}
+	}
+	read.ReadAt = s.now()
+	if err != nil {
+		read.Error = err.Error()
+		log.Printf("print %d: couldn't read the mesh after the print: %v", job.ID, err)
+	} else {
+		lo, hi := read.Mesh.Range()
+		log.Printf("print %d: mesh after the print, range %.3f mm, %+.3f to %+.3f", job.ID, hi-lo, lo, hi)
+	}
+	s.print.mu.Lock()
+	if cur := s.print.job; cur != nil && cur.ID == job.ID {
+		cur.MeshRead = read
+		s.savePrintJob()
+	}
+	s.print.mu.Unlock()
+	s.saveMeshHistory(job, read)
+}
+
+func (s *Server) saveMeshHistory(job *PrintJob, read *MeshRead) {
+	if s.DataDir == "" {
+		return
+	}
+	line, err := json.Marshal(struct {
+		Print int    `json:"print"`
+		Name  string `json:"name"`
+		Mode  string `json:"mode"`
+		*MeshRead
+	}{job.ID, job.Name, job.Mode, read})
+	if err == nil {
+		var f *os.File
+		f, err = os.OpenFile(filepath.Join(s.DataDir, meshHistoryFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+		if err == nil {
+			_, err = f.Write(append(line, '\n'))
+			if cerr := f.Close(); err == nil {
+				err = cerr
+			}
+		}
+	}
+	if err != nil {
+		log.Printf("print %d: couldn't save the mesh history: %v", job.ID, err)
+	}
+}
+
+// meshPoint records a point of the mesh. It's called with print.mu held. The job isn't
+// saved for it, as that would write the file every 2 seconds for nothing a restart needs.
+func (s *Server) meshPoint(point, of int) {
+	job := s.print.job
+	if job.State != PrintRunning {
+		return
+	}
+	now := s.now()
+	started := now
+	// Point 1, or a count that goes back, is a new mesh.
+	if m := job.Mesh; m != nil && point > m.Point && of == m.Of {
+		started = m.StartedAt
+	}
+	// A new one each time, as copies of the job share it.
+	job.Mesh = &MeshProgress{Point: point, Of: of, StartedAt: started, PointAt: now}
+	// Only the ends are logged, which is enough to show the lines arrive, by either route.
+	switch {
+	case started.Equal(now):
+		log.Printf("print %d: probing the mesh, point %d of %d, %s", job.ID, point, of, job.Mode)
+	case point == of:
+		log.Printf("print %d: mesh probed, point %d of %d, %.1fs after the first", job.ID, point, of, now.Sub(started).Seconds())
+	}
+}
+
+// statusPrintJob is printJob with PointSeconds filled in.
+func (s *Server) statusPrintJob() *PrintJob {
+	job := s.printJob()
+	if job != nil && job.Mesh != nil {
+		mesh := *job.Mesh
+		mesh.PointSeconds = max(s.now().Sub(mesh.PointAt).Seconds(), 0)
+		job.Mesh = &mesh
+	}
+	return job
 }
 
 type printState struct {
@@ -180,12 +317,17 @@ func (s *Server) wakeWatcher() {
 	}
 }
 
-// PrinterLine is told when a print finishes or the firmware halts. It's on the
-// link's read loop, so it only leaves a note for the watcher.
+// PrinterLine is told when a print finishes, the firmware halts or G29 starts a point
+// of the mesh. It's on the link's read loop, so it only leaves a note for the watcher.
 func (s *Server) PrinterLine(line string) {
 	s.print.mu.Lock()
 	defer s.print.mu.Unlock()
 	if !s.print.job.active() {
+		return
+	}
+	// Progress, not trouble, whatever state the job is in.
+	if point, of, ok := marlin.ParseMeshPoint(line); ok {
+		s.meshPoint(point, of)
 		return
 	}
 	// The firmware says this for an SD print's own cancel too, which stops by itself. A

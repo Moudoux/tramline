@@ -39,7 +39,7 @@ The pattern Jupyter uses, each rule with a test:
 
 ### The page
 
-- **Layout:** the read-only page's look, with the 3D view across the window and a panel on the left. At the top a status card: file, progress, layer, time left, temperatures and plug, and the buttons for what's running now. Below it tabs: **Files** (drop zone, files on the Pi with Print, Schedule, Copy to card and Delete, the card's listing), **Printer** (plug, preheat and cool, tram check with a bed map, firmware), **Schedule** (list with Cancel, and a count on the tab), **More** (Hue pair and plugs, `tram info`, versions). Below 760 px wide, the view goes on top and the panel below.
+- **Layout:** the read-only page's look, with the 3D view across the window and a panel on the left. At the top a status card: file, progress, layer, time left, temperatures and plug, and the buttons for what's running now. Below it tabs: **Files** (drop zone, files on the Pi with Print, Schedule, Copy to card and Delete, the card's listing), **Printer** (plug, preheat and cool, tram check with a bed map, firmware), **Schedule** (list with Cancel, and a count on the tab), **More** (Hue pair and plugs, `tram info`, "Read the mesh", with the last print's mesh and a coloured surface in the 3D view, added 2026-11-06, see Built: mesh heights and Built: mesh surface and the read after each print, versions). Below 760 px wide, the view goes on top and the panel below.
 - **Drag and drop** a file anywhere on the window.
 - **Tabs switch instantly,** highlight included, and each keeps its own scroll position. The scrolling area always keeps room for its scrollbar, so a tab that scrolls doesn't shift sideways, and the file and schedule lists are only rebuilt when they change. The user saw a glitch clicking between tabs on 2026-11-05: the highlight faded in over 150 ms after the content had already switched, the content jumped sideways by the scrollbar's width, and all tabs shared one scroll position. All three were fixed and checked from screencast frames in headless Chrome, not yet by the user.
 - **A failed tram check** shows the bed map from above, the corner to change outlined, the range against the limit, and "Lower back-right: turn its knob counter-clockwise, seen from above", with **Check again** (`print --continue`) and **Cancel print**.
@@ -62,6 +62,10 @@ Like `sim-web.sh`: a simulated printer on `127.0.0.1:18726` with a throwaway key
 
 - `go test`: each authentication rule, the route list both ways, the page and the Pi's status and model, uploads (sent once, the same file skipped, a changed one sent, bad names refused). The read-only page's test also checks it doesn't serve the GUI's files.
 - **In headless Chrome on the simulator, 2026-11-05,** driven over the DevTools protocol, with screenshots: sign-in, power on, a tram check from the dialog with its live bed map and result, an upload during a print with the rename offer, a print streamed from the Pi with the 3D view and progress, cancelling it, a failed tram check with Check again and Cancel, scheduling with its list, cancel and tab count, copying to the card with Stop copy, Hue plugs, an error from `tram info` with the plug off, the stop button held briefly (nothing) and fully (stopped, plug off), a narrow window, and the GUI being stopped. No script errors. The read-only page was checked the same way after the split.
+
+**Tram view, 2026-11-05:** the 3D view shows a tram check live, with the head moving, probe points and reading pins, see Built: tram check. Checked the same way, on the simulator only.
+
+**Mesh view, 2026-11-05, later:** during a print's `G29 P1`, the 3D view shows the 5×5 mesh filling in and the head at the point UBL's order puts it, marked as an estimate, and the status card gives the point, see Built: mesh. Checked the same way, on the simulator only.
 
 ### Not proven
 

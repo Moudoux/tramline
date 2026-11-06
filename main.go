@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"os"
 	"os/signal"
@@ -59,6 +60,9 @@ Client:
   tramline tram --bed-clear [--inset <mm>] [--repeat <n>] [--json]
                                                  probe the corners, exit 3 if out of tram
   tramline tram info                             ask the firmware about probing, no movement
+  tramline mesh [--raw] [--json]                 show the bed mesh the printer holds now, no
+                                                 movement: after power-on the one it loaded
+                                                 at boot, just after a print that print's
   tramline upload <path>                         save a file on the Pi, nothing else. Its name
                                                  there is <file> in the commands below
   tramline copy <file> [--no-wait] [--window <bytes>]
@@ -127,6 +131,8 @@ func main() {
 		err = runCool(args)
 	case "tram":
 		err = runTram(args)
+	case "mesh":
+		err = runMesh(args)
 	case "upload":
 		err = runUpload(args)
 	case "copy":
@@ -292,9 +298,14 @@ func runServe(args []string) error {
 	}
 
 	open := func() (io.ReadWriteCloser, error) { return serial.Open(cfg.Serial.Device, cfg.Serial.Baud) }
+	// G28, G30 and G29 P1 take about as long as on the real printer, so the GUI's view of
+	// the head during a tram check and the mesh can be seen. Real figures: G28 14 to 20 s,
+	// G30 about 5 s, G29 P1 about a minute.
 	simPlug := &sim.Plug{Options: sim.Options{
 		Garbage:   true,
-		MoveDelay: 500 * time.Millisecond,
+		HomeDelay: 17 * time.Second,
+		MoveDelay: 5 * time.Second,
+		MeshScale: 1,
 		PrintTime: 2 * time.Minute,
 		Corners:   sim.Corners{FL: 0.10, FR: 0.13, BR: 0.21, BL: 0.09},
 		LineDelay: *simLineDelay,
@@ -495,6 +506,76 @@ func runCool(args []string) error {
 	}
 	fmt.Println("Heaters are off")
 	return nil
+}
+
+func runMesh(args []string) error {
+	fs := flag.NewFlagSet("mesh", flag.ContinueOnError)
+	raw := fs.Bool("raw", false, "print the firmware's reply as it came")
+	asJSON := fs.Bool("json", false, "print the result as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: tramline mesh [--raw] [--json]")
+	}
+	c, err := loggedIn()
+	if err != nil {
+		return err
+	}
+	info, err := c.MeshInfo()
+	if err != nil {
+		return err
+	}
+	switch {
+	case *asJSON:
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(info)
+	case *raw || info.Mesh == nil:
+		for _, line := range info.Lines {
+			fmt.Println(line)
+		}
+		if info.Mesh == nil {
+			return fmt.Errorf("couldn't read a mesh in that: %s", info.ParseError)
+		}
+		return nil
+	}
+	fmt.Print(formatMesh(*info.Mesh))
+	return nil
+}
+
+// formatMesh draws the mesh as the bed is seen from the front, the back row first.
+func formatMesh(m marlin.MeshReport) string {
+	var b strings.Builder
+	state := "valid"
+	if !m.Valid {
+		state = "not valid, as some points have no height"
+	}
+	fmt.Fprintf(&b, "Mesh: %s", state)
+	if m.Slot != nil {
+		fmt.Fprintf(&b, ", storage slot %d", *m.Slot)
+	}
+	if m.Active != nil {
+		fmt.Fprintf(&b, ", leveling %s", map[bool]string{true: "on", false: "off"}[*m.Active])
+	}
+	b.WriteString("\nHeights in mm, back of the bed at the top, left on the left:\n")
+	lo, hi := math.Inf(1), math.Inf(-1)
+	for j := len(m.Z) - 1; j >= 0; j-- {
+		for _, z := range m.Z[j] {
+			if z == nil {
+				b.WriteString("       .")
+				continue
+			}
+			fmt.Fprintf(&b, " %+7.3f", *z)
+			lo, hi = min(lo, *z), max(hi, *z)
+		}
+		b.WriteString("\n")
+	}
+	if hi >= lo {
+		fmt.Fprintf(&b, "Range %.3f mm, from %+.3f to %+.3f\n", hi-lo, lo, hi)
+	}
+	b.WriteString("After power-on this is the mesh saved in the printer and loaded at boot. Just after a print,\nbefore the printer turns off, it's that print's.\n")
+	return b.String()
 }
 
 // errOutOfTram means the run worked, and its answer is that the bed needs adjusting.
@@ -793,6 +874,10 @@ func printPrintStatus(w io.Writer, job *server.PrintJob) {
 			fmt.Fprintf(w, " sent, %d resends, %d nudges", job.Resends, job.Nudges)
 		}
 		fmt.Fprintln(w)
+		// A point takes 2 to 4 seconds, so an older one means G29 has ended or stopped.
+		if m := job.Mesh; m != nil && (m.PointSeconds < 5 || m.Point < m.Of && m.PointSeconds < 30) {
+			fmt.Fprintf(w, "          Probing the mesh, point %d of %d\n", m.Point, m.Of)
+		}
 	case server.PrintCancelling:
 		fmt.Fprintf(w, "Print:    %s is being cancelled\n", job.Name)
 	case server.PrintFailed:

@@ -2,7 +2,7 @@
 
 The record of Tramline's design, firmware findings, test results and open issues. For what it is and how to use it, see the [README](../README.md).
 
-**A read-only web page, `tramline web`, is installed on the Pi, see Web page. Status: running on the Pi with mutual TLS, paired with the real Hue Bridge, and `tramline power` works on the real plug. Stage 5, read-only printer status, has passed on the real printer. Stage 6, heating, has passed on the real printer, including the 30-minute idle timeout at low temperatures. `tramline tram` works on the real printer. Stage 7 has passed on the real printer. Stage 8, SD upload, has passed on the real printer, at 14 KB/s with a sliced file. Stage 9, `print`, `cancel` and `estop`, has passed on the real printer with a cold file and a small real print. Tram before every print is in use, with only its pass path run on the real printer. The first long print, 4 h 10 min, finished cleanly on 2026-11-04. Stage 10, printing by streaming, has passed on the real printer, including a 63-minute job that finished cleanly on 2026-11-04 with no resends, see Streaming design.** Last updated 2026-11-04.
+**A read-only web page, `tramline web`, is installed on the Pi, see Web page. Status: running on the Pi with mutual TLS, paired with the real Hue Bridge, and `tramline power` works on the real plug. Stage 5, read-only printer status, has passed on the real printer. Stage 6, heating, has passed on the real printer, including the 30-minute idle timeout at low temperatures. `tramline tram` works on the real printer. Stage 7 has passed on the real printer. Stage 8, SD upload, has passed on the real printer, at 14 KB/s with a sliced file. Stage 9, `print`, `cancel` and `estop`, has passed on the real printer with a cold file and a small real print. Tram before every print is in use, with only its pass path run on the real printer. The first long print, 4 h 10 min, finished cleanly on 2026-11-04. Stage 10, printing by streaming, has passed on the real printer, including a 63-minute job that finished cleanly on 2026-11-04 with no resends, see Streaming design.** Last updated 2026-11-06.
 
 | Part | State |
 |---|---|
@@ -23,6 +23,8 @@ The record of Tramline's design, firmware findings, test results and open issues
 | Listening by interface, including Tailscale, `listen_interfaces` | Built and installed 2026-11-04. On the Pi it listens on `eth0` and on `tailscale0`, IPv4 and IPv6, and the page answers on those addresses from the Pi itself, but not on `eth0.2` or `docker0`. The user confirmed it works over Tailscale from a phone on 5G. An address changing has only run in tests. See Listening by interface |
 | Scheduled prints, `schedule`, `schedule list`, `schedule cancel` | Built 2026-11-05. Tests and the simulator only, not yet installed or run on the real printer. See Scheduled prints |
 | Desktop GUI, `tramline gui` | Built 2026-11-05, with everything the client's commands do and uploads from the browser. `go test` and headless Chrome on the simulator only, not yet used with the real Pi. See Desktop GUI |
+| Mesh heights, `tramline mesh` | Built 2026-11-06: `M420 V1 T1`, read-only in the firmware's source, in the CLI and the GUI as text. `go test` and headless Chrome on the simulator only, installed 2026-11-06. **On the real printer 2026-11-06: the stored mesh after power-on, and a print's fresh mesh just after it ended. Mesh lines arrive during a card print too.** Read by itself after each print that probed a mesh, and drawn in the GUI as a coloured surface: built 2026-11-06, simulator only, not installed. See Built: mesh heights, and Built: mesh surface and the read after each print |
+| Probe view, the head live during a tram check and the mesh | Built 2026-11-05 for the GUI. Tram check: phase, target and step time in status, and the 3D view's probe points, moving head and reading pins. Mesh: each "Probing mesh point N/25." into the print job, and the 3D view's 5×5 grid filling in with the head at an estimated point, by UBL's order, which fits the real log's timing. `go test` and headless Chrome on the simulator only, not installed. On 2026-11-06 a card print showed the mesh lines arrive from the card too, and the user's video showed the real head following the assumed order. See Probe view |
 | `tramline update` | Not started |
 
 ## Files
@@ -34,13 +36,13 @@ Read [next-session.md](next-session.md) first. Paths in the notes, such as `inte
 | [next-session.md](next-session.md) | Current state, what to do next, what is not proven on the real printer, open issues, rules |
 | [pi-hang.md](pi-hang.md) | The unexplained Pi hang, the repeat tests, and the Hue plug switching itself off |
 | [goal-and-hardware.md](goal-and-hardware.md) | Goal, hardware, verified connection, M115 capabilities, the USB cable |
-| [firmware.md](firmware.md) | Tramming, serial and host behaviour, custom codes |
+| [firmware.md](firmware.md) | Tramming, the mesh (which command prints it and which mesh a read finds), serial and host behaviour, custom codes |
 | [architecture.md](architecture.md) | Language, build and dependencies, code structure, elevated commands, the secrets rule |
 | [security.md](security.md) | Mutual TLS, allow list, listening addresses, what it does not solve |
 | [install-and-config.md](install-and-config.md) | Install and updates, config, listening by interface (LAN and Tailscale) |
 | [api.md](api.md) | Every CLI command and its API endpoint |
 | [web-page.md](web-page.md) | tramline web, the 3D view, how it shares the port, trying it on the simulator |
-| [probe-view.md](probe-view.md) | Planned: live view of the head during the tram check and the mesh probing, what the firmware reports, the plan |
+| [probe-view.md](probe-view.md) | Live view of the head during the tram check and the mesh probing (both built, simulator only): what the firmware reports, UBL's point order and its fit to the real log, the plan, what's built, and a warning about testing on the simulator |
 | [gui.md](gui.md) | tramline gui: the local web GUI with everything the CLI does, its sign-in, routes, page, tests and what isn't proven |
 | [printing.md](printing.md) | Print flow and print design, with firmware findings and results |
 | [streaming.md](streaming.md) | Printing by streaming, lost lines, the long print |
@@ -80,6 +82,7 @@ The text refers to sections by name, as in "see Stand print result". Sections ma
 | · M115 capabilities | [goal-and-hardware.md](goal-and-hardware.md) |
 | The USB cable | [goal-and-hardware.md](goal-and-hardware.md) |
 | · Tramming | [firmware.md](firmware.md) |
+| · Mesh | [firmware.md](firmware.md) |
 | · Serial and host behaviour | [firmware.md](firmware.md) |
 | · Custom codes | [firmware.md](firmware.md) |
 | · · Possible blocker | [firmware.md](firmware.md) |
@@ -101,6 +104,11 @@ The text refers to sections by name, as in "see Stand print result". Sections ma
 | Probe view | [probe-view.md](probe-view.md) |
 | · What's known | [probe-view.md](probe-view.md) |
 | · Plan | [probe-view.md](probe-view.md) |
+| · Built: tram check | [probe-view.md](probe-view.md) |
+| · Built: mesh | [probe-view.md](probe-view.md) |
+| · Built: mesh heights | [probe-view.md](probe-view.md) |
+| · Built: mesh surface and the read after each print | [probe-view.md](probe-view.md) |
+| · Proposed printer tests | [probe-view.md](probe-view.md) |
 | · · Rules | [probe-view.md](probe-view.md) |
 | Desktop GUI, `tramline gui` | [gui.md](gui.md) |
 | · · Shape | [gui.md](gui.md) |

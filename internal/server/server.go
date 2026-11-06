@@ -110,6 +110,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/cool", s.handleCool)
 	mux.HandleFunc("POST /v1/tram", s.handleTram)
 	mux.HandleFunc("GET /v1/tram/info", s.handleTramInfo)
+	mux.HandleFunc("GET /v1/mesh", s.handleMeshInfo)
 	mux.HandleFunc("PUT /v1/files/{name}", s.handleFilePut)
 	mux.HandleFunc("GET /v1/files/{name}", s.handleFileGet)
 	mux.HandleFunc("DELETE /v1/files/{name}", s.handleFileDelete)
@@ -156,7 +157,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		HeatProblem:  problem,
 		Tram:         s.tramJob(),
 		Copy:         s.copyJob(),
-		Print:        s.printJob(),
+		Print:        s.statusPrintJob(),
 		Scheduled:    s.pendingSchedules(),
 	})
 }

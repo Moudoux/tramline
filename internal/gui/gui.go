@@ -52,6 +52,7 @@ var APIRoutes = []string{
 	"POST /v1/cool",
 	"POST /v1/tram",
 	"GET /v1/tram/info",
+	"GET /v1/mesh",
 	"GET /v1/files",
 	"GET /v1/files/{name}",
 	"DELETE /v1/files/{name}",

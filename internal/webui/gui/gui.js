@@ -17,6 +17,7 @@ const CORNERS = ["front-left", "front-right", "back-right", "back-left"];
 // The bed map is drawn as seen from above, with the back at the top.
 const MAP_ORDER = [3, 2, 0, 1];
 const SCHEDULE_PENDING = ["checking", "waiting", "starting"];
+const PIN_HINT = "In the 3D view each reading stands as a pin, 20 mm for every 0.05 mm above or below the average, the faint plane. The head's moves are worked out, not measured.";
 
 let info = { tram_tolerance: 0.05 };
 let page = null;
@@ -27,7 +28,7 @@ let lastCopyState = null;
 let fullTimer = 0;
 let gone = false;
 
-const view = new PrintView($("view"), (id) => `/pi/model/${id}`);
+const view = new PrintView($("view"), (id) => `/pi/model/${id}`, $("view-labels"));
 if (!view.ok) {
   $("no-webgl").hidden = false;
   $("view").hidden = true;
@@ -279,6 +280,11 @@ function showNow() {
       message = job.parked ? "The head is parked. The bed may be hot." : "The head may be low. The bed may be hot.";
       message += " Adjust the knob, then check again.";
     }
+    if (job.state === "checking" && tramming() && full.tram.step) message = `Tram check: ${full.tram.step}.`;
+    const mesh = meshShown();
+    if (mesh && mesh.id === job.id) {
+      message = `Probing the mesh, point ${mesh.mesh.point} of ${mesh.mesh.of}. The head's place is an estimate, as the printer doesn't report it.`;
+    }
   } else if (st.tramming || tramming()) {
     [text, kind] = ["checking tram", "active"];
     message = full && full.tram && full.tram.step ? `Tram check: ${full.tram.step}.` : "Probing the corners of the bed.";
@@ -425,6 +431,9 @@ function showFull() {
   $("about-server").textContent = `${st.version}${st.simulated ? ", simulated printer" : ""}`;
 
   showTram(st.tram);
+  showTramView();
+  showMeshView();
+  showLastMesh(st.print);
 
   // A copy that just ended changes the files' state.
   const copyState = st.copy ? `${st.copy.id}:${st.copy.state}` : null;
@@ -454,9 +463,11 @@ function showTram(job) {
   if (job.state === "running") {
     const round = job.rounds && job.rounds.length ? job.rounds[job.rounds.length - 1] : null;
     const so = {};
-    if (round) for (const r of round.readings) so[CORNERS.indexOf(r.corner)] = r.z;
+    // A round's readings are null until its first one is in.
+    if (round) for (const r of round.readings || []) so[CORNERS.indexOf(r.corner)] = r.z;
     parts.push(el("p", "hint", `Running${job.repeat > 1 ? `, round ${job.rounds.length} of ${job.repeat}` : ""}: ${job.step || "starting"}.`));
     parts.push(bedMap(null, null, so));
+    parts.push(el("p", "hint", PIN_HINT));
   } else if (job.state === "failed") {
     parts.push(el("p", "problem", `The last check failed: ${job.error}`));
   } else if (job.result) {
@@ -473,6 +484,56 @@ function showTram(job) {
   box.replaceChildren(...parts);
 }
 
+// The 3D view shows a tram check while it runs, for a while after, and while a print waits
+// for the bed to be adjusted, but not once a print is under way.
+const TRAM_VIEW_AFTER_MS = 2 * 60 * 1000;
+const tramSeen = { id: 0, endedAt: 0 };
+function showTramView() {
+  if (!view.ok) return;
+  const job = full && full.tram;
+  const state = page && page.print ? page.print.state : "";
+  const now = performance.now();
+  let show = null;
+  if (job && job.state === "running") {
+    tramSeen.id = job.id;
+    tramSeen.endedAt = 0;
+    show = job;
+  } else if (job) {
+    if (job.id === tramSeen.id && !tramSeen.endedAt) tramSeen.endedAt = now;
+    const recent = job.id === tramSeen.id && now - tramSeen.endedAt < TRAM_VIEW_AFTER_MS;
+    if (recent || state === "adjusting") show = job;
+  }
+  if (["starting", "running", "cancelling"].includes(state)) show = null;
+  view.updateTram(show, info.tram_tolerance);
+}
+
+// The mesh probing at the start of a print, from the full status, which has it: while
+// G29 goes, and a few seconds after its last point. A point takes 2 to 4 seconds, so one
+// older than MESH_STALE_S means G29 has stopped, or a message was missed.
+const MESH_AFTER_S = 6;
+const MESH_STALE_S = 30;
+// The file's start, where its G29 is, is within this many bytes, so status is read more
+// often until then, to catch the mesh starting.
+const MESH_START_BYTES = 4096;
+function meshShown() {
+  const job = full && full.print;
+  if (!job || !job.mesh || job.state !== "running") return null;
+  if (!page || !page.print || page.print.id !== job.id || page.print.state !== "running") return null;
+  const m = job.mesh;
+  const age = m.point_seconds || 0;
+  if (age > MESH_STALE_S || (m.point >= m.of && age > MESH_AFTER_S)) return null;
+  return job;
+}
+
+function showMeshView() {
+  if (view.ok) view.updateMesh(meshShown());
+}
+
+function meshSoon() {
+  const job = page && page.print;
+  return Boolean(meshShown() || (job && job.state === "running" && job.pos < MESH_START_BYTES));
+}
+
 // ---- Polling ----
 
 async function pollPage() {
@@ -480,6 +541,9 @@ async function pollPage() {
   try {
     page = await api("GET", "/pi/status");
     if (view.ok) view.update(page.print);
+    showTramView();
+    showMeshView();
+    if (heightsShown && page.print && PRINT_BUSY.includes(page.print.state)) showHeights(null);
     showNow();
   } catch (err) {
     if (!(err instanceof Gone)) {
@@ -504,7 +568,7 @@ async function pollFull() {
       }
     }
   }
-  const busy = tramming() || copying() || (page && page.print && PREPARING.includes(page.print.state));
+  const busy = tramming() || copying() || meshSoon() || (page && page.print && PREPARING.includes(page.print.state));
   fullTimer = setTimeout(pollFull, busy ? FULL_BUSY_MS : FULL_MS);
 }
 
@@ -1075,6 +1139,79 @@ $("tram-info").addEventListener("click", async (e) => {
   $("tram-info-out").textContent = lines.join("\n");
   $("tram-info-out").hidden = false;
 });
+
+$("mesh-info").addEventListener("click", async (e) => {
+  const info = await act(e.currentTarget, () => api("GET", "/v1/mesh"));
+  if (!info || info === true) return;
+  $("tram-info-out").textContent = info.mesh ? meshText(info.mesh) : `${(info.lines || []).join("\n")}\n\nCouldn't read a mesh in that: ${info.parse_error}`;
+  $("tram-info-out").hidden = false;
+  showHeights(info.mesh || null);
+});
+
+// The mesh drawn over the bed, or null. A print getting under way takes the view back.
+const PRINT_BUSY = ["heating", "soaking", "checking", "adjusting", "starting", "running", "cancelling"];
+let heightsShown = null;
+function showHeights(mesh) {
+  heightsShown = mesh;
+  if (view.ok) view.updateHeights(mesh);
+  $("mesh-hide").hidden = !mesh;
+}
+
+$("mesh-hide").addEventListener("click", () => showHeights(null));
+
+// The mesh read after the last print, which the server keeps in the print job. It's
+// shown by itself once, if it's recent, and the button shows it again.
+const MESH_FRESH_MS = 10 * 60 * 1000;
+let meshAutoShown = 0;
+let lastMesh = null;
+function showLastMesh(job) {
+  const read = job && job.mesh_read;
+  $("mesh-last").hidden = !read;
+  lastMesh = read && read.mesh ? read.mesh : null;
+  if (!read) return;
+  if (!read.mesh) {
+    $("mesh-last-text").textContent = `The mesh after ${job.name} couldn't be read: ${read.error}`;
+    $("mesh-last-show").hidden = true;
+    return;
+  }
+  const known = read.mesh.z.flat().filter((z) => z != null);
+  const range = known.length ? Math.max(...known) - Math.min(...known) : 0;
+  $("mesh-last-text").textContent = `The mesh after ${job.name}, read at ${clockTime(read.read_at)}: range ${range.toFixed(3)} mm.`;
+  $("mesh-last-show").hidden = false;
+  const fresh = Date.now() - new Date(read.read_at).getTime() < MESH_FRESH_MS;
+  if (meshAutoShown !== job.id && fresh && !PRINT_BUSY.includes(job.state)) {
+    meshAutoShown = job.id;
+    showHeights(read.mesh);
+  }
+}
+
+$("mesh-last-show").addEventListener("click", () => {
+  if (!lastMesh) return;
+  $("tram-info-out").textContent = meshText(lastMesh);
+  $("tram-info-out").hidden = false;
+  showHeights(lastMesh);
+});
+
+// meshText draws the mesh as the bed is seen from the front, as `tramline mesh` does.
+function meshText(m) {
+  const head = [`Mesh: ${m.valid ? "valid" : "not valid, as some points have no height"}`];
+  if (m.slot != null) head.push(`storage slot ${m.slot}`);
+  if (m.active != null) head.push(`leveling ${m.active ? "on" : "off"}`);
+  const rows = [head.join(", "), "Heights in mm, back of the bed at the top, left on the left:"];
+  const all = [];
+  for (let j = m.z.length - 1; j >= 0; j--) {
+    rows.push(m.z[j].map((z) => {
+      if (z == null) return "       .";
+      all.push(z);
+      return ((z >= 0 ? "+" : "") + z.toFixed(3)).padStart(8);
+    }).join(""));
+  }
+  if (all.length) {
+    const lo = Math.min(...all), hi = Math.max(...all);
+    rows.push(`Range ${(hi - lo).toFixed(3)} mm`);
+  }
+  return rows.join("\n");
+}
 
 // ---- Emergency stop ----
 //

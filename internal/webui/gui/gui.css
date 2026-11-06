@@ -45,6 +45,22 @@ h2 {
 
 #view:active { cursor: grabbing; }
 
+/* The tram view's readings, placed over the pins by the view. */
+#view-labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+#view-labels span {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 3px 7px;
+  font: 600 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: nowrap;
+  color: var(--text);
+  background: rgba(21, 24, 28, 0.82);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+#view-labels span.bad { color: var(--bad); border-color: var(--bad); }
+
 #no-webgl {
   position: fixed;
   left: calc(var(--side) + 32px);

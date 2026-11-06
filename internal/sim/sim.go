@@ -40,6 +40,11 @@ type Options struct {
 	Printing func() bool
 	// MoveDelay is how long G28 and G30 take, saying "busy" while they run.
 	MoveDelay time.Duration
+	// MeshScale times G29 P1's points: 1 is the real printer's pace, 2.3 to 3 s a point
+	// and about a minute in all, and 0 runs them at once. See MeshOrder.
+	MeshScale float64
+	// HomeDelay, if set, is how long G28 takes instead.
+	HomeDelay time.Duration
 	// StallOn makes the command starting with this word take Stall to answer,
 	// like a long move. Later commands wait their turn, as they do on the real board.
 	StallOn string
@@ -138,6 +143,11 @@ type printer struct {
 	bed          float64
 	bedTarget    float64
 	movedAt      time.Time
+
+	// mesh is what UBL holds, and leveling whether it's on. Only the command loop
+	// touches them. See mesh.go.
+	mesh     meshGrid
+	leveling bool
 }
 
 // New starts a printer and returns the host's end of its connection. Closing
@@ -152,6 +162,7 @@ func New(opts Options) io.ReadWriteCloser {
 		opts: opts, conn: device, closed: make(chan struct{}), card: card,
 		nozzle: ambientNozzle, bed: ambientBed, movedAt: time.Now(), curN: -1,
 		holdEnds: make(chan struct{}, 1), heatEnds: make(chan struct{}, 1), stopMoves: make(chan struct{}, 1),
+		mesh: storedMesh(),
 	}
 	card.attach(p)
 	go p.run()
@@ -404,7 +415,11 @@ func (p *printer) command(line string) {
 		p.autoreport(line)
 		p.ok()
 	case "G28":
-		p.wait(p.opts.MoveDelay, true)
+		home := p.opts.MoveDelay
+		if p.opts.HomeDelay > 0 {
+			home = p.opts.HomeDelay
+		}
+		p.wait(home, true)
 		p.send("X:0.00 Y:0.00 Z:10.00 E:0.00 Count X:0 Y:0 Z:0")
 		p.ok()
 	case "G30":
@@ -437,9 +452,20 @@ func (p *printer) command(line string) {
 	case "M503":
 		p.send("echo:  G21 ; (mm)")
 		p.ok()
+	case "M420":
+		p.reportMesh(rest)
 	case "G29":
-		p.send("MESH_MIN_X  25=25")
-		p.ok()
+		switch strings.TrimSpace(rest) {
+		case "P1":
+			p.probeMesh()
+		case "A":
+			p.leveling = true
+			p.send("Unified Bed Leveling System v1.01 active")
+			p.ok()
+		default:
+			p.send("MESH_MIN_X  25=25")
+			p.ok()
+		}
 	default:
 		p.send("echo:Unknown command: %q", line)
 		p.ok()

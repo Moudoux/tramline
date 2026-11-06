@@ -243,7 +243,8 @@ func (l *Link) handle(line string) {
 	if temps, ok := parseTemps(trimmed); ok && l.onTemps != nil {
 		l.onTemps(temps)
 	}
-	if l.onLine != nil && (strings.Contains(trimmed, "Done printing file") || strings.Contains(trimmed, ActionCancel) || isHalt(trimmed)) {
+	if l.onLine != nil && (strings.Contains(trimmed, "Done printing file") || strings.Contains(trimmed, ActionCancel) || isHalt(trimmed) ||
+		strings.HasPrefix(trimmed, meshPointPrefix)) {
 		l.onLine(trimmed)
 	}
 	isOK := trimmed == "ok" || strings.HasPrefix(trimmed, "ok ")

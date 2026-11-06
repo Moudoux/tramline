@@ -23,6 +23,7 @@ Port `8726` is proposed, which spells TRAM on a phone keypad. Not currently in u
 | `tramline cool` | `POST /v1/cool` | Heaters off |
 | `tramline tram --bed-clear [--inset <mm>] [--repeat <n>] [--json]` | `POST /v1/tram` | Probe corners and report. Exits 3 if out of tram |
 | `tramline tram info` | `GET /v1/tram/info` | Fixed read-only list: `M118`, `M114`, `M851`, `M503`, `G29 W` |
+| `tramline mesh [--raw] [--json]` | `GET /v1/mesh` | The mesh the printer holds now, from `M420 V1 T1`, which only prints. Nothing moves. Refused during a print, a tram check or a copy, and with the plug off. Run on the real printer 2026-11-06, see Built: mesh heights. Each print Tramline runs also reads it once after the print, into the job's `mesh_read` in `GET /v1/status` and `mesh-history.jsonl` |
 | `tramline upload <path>` | `GET` and `PUT /v1/files/<name>` | Save on the Pi unless it's already there, nothing else. Built |
 | `tramline copy <name> [--no-wait]`, `tramline copy --cancel` | `POST /v1/files/<name>/copy`, `POST /v1/copy/cancel` | Copy a file on the Pi to SD, which is also how to retry, or stop a copy. Built |
 | `tramline files [--json]`, `tramline files rm <name>` | `GET /v1/files`, `DELETE /v1/files/<name>` | List files on the Pi and the card, or delete one, with its copy on the card. Built |
