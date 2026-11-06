@@ -247,7 +247,7 @@ dd.off { color: var(--muted); }
 .state-text { flex: 1; }
 
 .hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
-.block > .hint:first-of-type { margin-top: -2px; margin-bottom: 10px; }
+.row > .hint { flex: 1; margin: 0; }
 
 /* ---- Buttons and fields ---- */
 
@@ -390,7 +390,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .chip.active { color: var(--accent); border-color: rgba(240, 136, 62, 0.5); }
 .chip.bad { color: var(--bad); border-color: rgba(242, 100, 90, 0.5); }
 
-.list.compact > li { padding: 6px 8px; }
+.list > li.compact { padding: 6px 8px; }
 .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
 
 /* ---- Tram ---- */
@@ -454,7 +454,18 @@ pre.out {
 
 .about { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
 .about dd { font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
-.about + .hint { margin-top: 12px; }
+
+/* ---- Spacing ---- */
+
+/* A block's parts, and the tram results' parts, are spaced evenly, whatever they are,
+   so a button row never sits on the text above it. This comes after the parts' own
+   rules so it wins. A heading sits a little closer to what it heads. The bed map's
+   "front" label hangs below it, so what follows the map needs more room. */
+.block > *, #tram-view > *, #check-card > * { margin-top: 0; margin-bottom: 0; }
+.block > * + *, #tram-view > * + *, #check-card > * + * { margin-top: 10px; }
+.block > h2 + * { margin-top: 8px; }
+#tram-view > .bedmap + *, #check-card > .bedmap + * { margin-top: 18px; }
+.pane > .row + .list { margin-top: 12px; }
 
 /* ---- Emergency stop ---- */
 
