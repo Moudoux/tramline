@@ -4,6 +4,23 @@ A small print server for an Ender 3 V2, running on a Raspberry Pi. It's a lightw
 
 The name joins bed **tram**ming with the serial **line** to the printer.
 
+## Features
+
+- **Power:** switches the printer through a Hue smart plug, on by itself for a print, and off once the nozzle is below 50 °C after any print it started.
+- **Heating:** preheats to bed 80 °C and nozzle 150 °C by default, or any temperatures, and turns the heaters off.
+- **Tram checks:** probes the four corners, with an inset and repeats if wanted, and says which knob to turn and which way. Every print and scheduled print checks first and won't start out of tram.
+- **Bed mesh:** reads the mesh the printer holds, with no movement, reads each print's fresh mesh before the plug is cut, and keeps a history of them.
+- **Files:** uploads G-code to the Pi, lists and deletes files, and copies files to the printer's SD card at about 14 KB/s, with cancel and retry.
+- **Printing two ways:** streams the file from the Pi line by line, or prints from the SD card, which carries on if the Pi goes down.
+- **Scheduling:** checks tram now, powers off, then at the set time powers on, checks again and prints unattended. It cancels itself if the check fails or another print has started since.
+- **Stopping:** cancels a print with the heaters off, or an emergency stop with `M112` and the plug cut.
+- **Status:** power, temperatures, the current job, progress and how recent scheduled prints ended, also as JSON.
+- **Desktop GUI:** `tramline gui` does everything the commands do in a browser on your computer, with drag-and-drop uploads, a 3D print view, a live tram check and the mesh as a coloured surface.
+- **Web page:** a read-only status page with a 3D view of the print, served by the Pi to any browser or phone, with no login.
+- **Security:** mutual TLS with a key per client, allowed and revoked by fingerprint on the Pi, listening only on the LAN and Tailscale.
+- **Simulator:** `serve --sim` runs a simulated printer and plug, so prints and the GUI can be tried on your computer without the Pi.
+- **One binary:** server and client in one Go binary, standard library only, with no dependencies. The client runs on Linux and macOS, and the server on Linux, which can open the printer's serial port.
+
 ## How it works
 
 ```
@@ -19,8 +36,6 @@ The same binary is both server and client. Only the server touches the printer a
 From a printer that's off to a finished print with the printer off again:
 
 ```sh
-alias tramline=dist/tramline-linux-amd64     # run from this folder, or tramline-darwin-arm64 on a Mac
-
 tramline status                                      # is anything running?
 tramline upload part_PETG.gcode                      # save it on the Pi
 tramline print part_PETG.gcode --from pi --bed-clear # the rest happens by itself
@@ -115,11 +130,17 @@ Run `tramline help` for everything, including the options and the commands used 
 
 Only Docker is needed, and the build uses the standard library alone. The macOS builds are for the client and the simulator: only Linux can open a real serial port, so the server stays on the Pi.
 
+The [justfile](justfile) wraps the scripts. Run `just` in this folder to list its recipes:
+
 ```sh
-./build.sh                       # check, test and build for Linux and macOS into dist/
-./build.sh test                  # check and test only
-deploy/install.sh raspberrypi    # install on the Pi, which uses sudo there
+just build             # ./build.sh: check, test and build for Linux and macOS into dist/
+just test              # ./build.sh test: check and test only
+just install           # build, then install this machine's client as tramline in ~/.local/bin
+just uninstall         # remove it again
+just deploy            # build, then deploy/install.sh raspberrypi: install on the Pi, which uses sudo there
 ```
+
+`just install` takes `TRAMLINE_BINDIR` for another folder, which has to be on your PATH.
 
 Setting up a new computer as a client is covered in the [main README](../README.md#tramline-for-printing).
 
