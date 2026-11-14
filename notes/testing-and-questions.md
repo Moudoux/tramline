@@ -21,7 +21,7 @@ Each stage must pass before moving on. **Hue comes first, so Claude can power th
 
 ## Open questions
 
-1. What caused the one-off Pi hang, and why did the Hue plug switch off by itself once?
+1. Is the Pi and the Hue plug stable over many power cycles?
 2. ~~Does a remotely started SD print wait for confirmation on the LCD?~~ No, tested 2026-11-03 with a cold file. See Print design.
 3. Is `G30` available and behaving the same way on the Dec 2023 build?
 4. ~~What are this printer's tramming points?~~ 25 and 205, the mesh limits in `M503`'s `C29` line. See Tram check.

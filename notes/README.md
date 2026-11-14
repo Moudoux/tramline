@@ -34,7 +34,6 @@ Read [next-session.md](next-session.md) first. Paths in the notes, such as `inte
 | File | What is in it |
 |---|---|
 | [next-session.md](next-session.md) | Current state, what to do next, what is not proven on the real printer, open issues, rules |
-| [pi-hang.md](pi-hang.md) | The unexplained Pi hang, the repeat tests, and the Hue plug switching itself off |
 | [goal-and-hardware.md](goal-and-hardware.md) | Goal, hardware, verified connection, M115 capabilities, the USB cable |
 | [firmware.md](firmware.md) | Tramming, the mesh (which command prints it and which mesh a read finds), serial and host behaviour, custom codes |
 | [architecture.md](architecture.md) | Language, build and dependencies, code structure, elevated commands, the secrets rule |
@@ -70,11 +69,6 @@ The text refers to sections by name, as in "see Stand print result". Sections ma
 | · · Print design | [next-session.md](next-session.md) |
 | · · Bed state | [next-session.md](next-session.md) |
 | · · Rules | [next-session.md](next-session.md) |
-| · The hang | [pi-hang.md](pi-hang.md) |
-| · The repeat tests | [pi-hang.md](pi-hang.md) |
-| · Follow-ups | [pi-hang.md](pi-hang.md) |
-| · · Clock warning | [pi-hang.md](pi-hang.md) |
-| · The Hue plug switching itself off | [pi-hang.md](pi-hang.md) |
 | Goal | [goal-and-hardware.md](goal-and-hardware.md) |
 | Hardware | [goal-and-hardware.md](goal-and-hardware.md) |
 | Verified: connection | [goal-and-hardware.md](goal-and-hardware.md) |

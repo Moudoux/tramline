@@ -9,7 +9,7 @@ Bridge found 2026-11-02 through Hue's discovery service, then confirmed with its
 | Field | Value |
 |---|---|
 | Address | `192.168.1.128` |
-| Bridge ID | `001788FFFE123456` |
+| Bridge ID | Real value in `/etc/tramline/config.json` on the Pi |
 | Model | `BSB002` |
 | API version | `1.78.0` |
 
@@ -17,7 +17,7 @@ Tested on the real bridge and plug on 2026-11-02, with logs in `test-logs/2026-1
 
 | Test | Result |
 |---|---|
-| Bridge certificate | Common name is `001788FFFE123456`, issued by `root-bridge`, and pairing accepted it |
+| Bridge certificate | Common name is the bridge ID, issued by `root-bridge`, and pairing accepted it |
 | `tramline hue pair`, `tramline hue plugs` | Passed. Light plug's type is `plug` and its `light` UUID switches it |
 | 3 `power on`, 3 `power off`, 20:23 to 20:26 | All passed, each taking about 0.3 seconds including reading the state back |
 | USB device after `power on` | Appears after about 1.6 seconds |

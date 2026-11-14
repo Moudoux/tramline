@@ -18,7 +18,7 @@ Part of the Tramline engineering notes, see the [index](README.md). Other sectio
 
 **Also 2026-11-05, asked for by the user after that, built and simulator only:** see CLI changes under Scheduled prints. Every print now turns the printer off, `print` turns it on, `upload` only uploads, `mode` is gone, `--from pi|sd` is required, and the web page lists scheduled prints.
 
-Auto-off on every print means a real power cycle after each one, so the unexplained Pi hang and the plug's self-off under Open issue matter more. Capture the kernel log during the first real tests.
+Auto-off on every print means a real power cycle after each one, so the Pi and plug stability matters more. Capture the kernel log during the first real tests.
 
 **Installed and committed:** the user installed `dev-20261105183233` on the Pi on 2026-11-05, and `status` confirmed it. It's committed and pushed to main. Nothing in it has run on the real printer yet: the first test proposed is scheduling `dry-run.gcode` about 20 minutes ahead with `--from pi`, about 30 minutes in all, with the kernel log captured, and only with the user's OK.
 

@@ -45,6 +45,6 @@ Decisions:
 
 **Not proven on the real printer:** all of it. Worth testing first, each with the user's OK, with a cold or tiny file at a time 15 to 20 minutes away:
 
-1. Real Hue plug and reconnect at the scheduled time, which has only had the simulated plug. The repeat power cycles matter here because of the Pi hang and the plug's self-off, so capture the kernel log.
+1. Real Hue plug and reconnect at the scheduled time, which has only had the simulated plug. The repeat power cycles matter here for Pi and plug stability, so capture the kernel log.
 2. Whether a board powered on by the plug behaves the same at 05:59 with nobody watching. The user still needs to review Hue rooms and routines before relying on this overnight, as a routine could switch the plug.
 3. A failed second check, by turning a knob during the wait, and auto-off from a truly hot nozzle: the simulator moves temperatures at 40°C a second, so the wait for below 50°C has only lasted seconds.
