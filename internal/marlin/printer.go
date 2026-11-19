@@ -74,12 +74,23 @@ func (p *Printer) Status() Status {
 	return p.status
 }
 
-// Run reconnects until ctx ends.
+// Run reconnects until ctx ends. Why it can't connect is logged once each time
+// the reason changes, so a port the service may not open doesn't fail silently.
 func (p *Printer) Run(ctx context.Context) {
+	var lastReason string
 	for ctx.Err() == nil {
+		reason := ""
 		conn, err := p.open()
-		if err == nil {
-			p.session(ctx, conn)
+		if err != nil {
+			reason = fmt.Sprintf("can't open the printer's port: %v", err)
+		} else if p.session(ctx, conn) {
+			lastReason = "" // it connected, so the next failure is news
+		} else {
+			reason = "the printer's port opened, but the printer didn't answer M115"
+		}
+		if reason != "" && reason != lastReason && ctx.Err() == nil {
+			log.Print(reason)
+			lastReason = reason
 		}
 		select {
 		case <-ctx.Done():
@@ -88,7 +99,9 @@ func (p *Printer) Run(ctx context.Context) {
 	}
 }
 
-func (p *Printer) session(ctx context.Context, conn io.ReadWriteCloser) {
+// session talks to the printer until the link drops, and reports whether the
+// handshake got that far.
+func (p *Printer) session(ctx context.Context, conn io.ReadWriteCloser) bool {
 	link := newLink(conn, p.setTemps, p.OnLine, p.SDLineIdle)
 	stop := context.AfterFunc(ctx, func() { link.Close() })
 	defer stop()
@@ -97,7 +110,7 @@ func (p *Printer) session(ctx context.Context, conn io.ReadWriteCloser) {
 
 	firmware, ok := handshake(ctx, link)
 	if !ok {
-		return
+		return false
 	}
 	link.sendMu.Lock()
 	link.wantNumbers = true
@@ -112,9 +125,10 @@ func (p *Printer) session(ctx context.Context, conn io.ReadWriteCloser) {
 
 	if _, err := link.Exchange(ctx, "M155 S2", startLinesIdle); err != nil {
 		log.Printf("couldn't start temperature reports: %v", err)
-		return
+		return true
 	}
 	<-link.Done()
+	return true
 }
 
 // handshake waits for the firmware to answer M115. A freshly powered board is

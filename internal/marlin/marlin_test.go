@@ -584,3 +584,45 @@ func TestTramInfoMovesNothing(t *testing.T) {
 		}
 	}
 }
+
+// A port the service may not open, as when systemd's DeviceAllow found no ttyUSB
+// group at start, must show in the log, once rather than every retry, and again
+// after a connection if it comes back.
+func TestPrinterLogsWhyItCantOpenOnce(t *testing.T) {
+	var buf bytes.Buffer
+	var mu sync.Mutex
+	log.SetOutput(lockedWriter{&mu, &buf})
+	defer log.SetOutput(os.Stderr)
+
+	var openMu sync.Mutex
+	opens, allowed := 0, false
+	p := NewPrinter(func() (io.ReadWriteCloser, error) {
+		openMu.Lock()
+		defer openMu.Unlock()
+		opens++
+		if !allowed {
+			return nil, errors.New("permission denied")
+		}
+		return sim.New(sim.Options{}), nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go p.Run(ctx)
+
+	waitFor(t, "three tries", func() bool {
+		openMu.Lock()
+		defer openMu.Unlock()
+		return opens >= 3
+	})
+	mu.Lock()
+	got := strings.Count(buf.String(), "can't open the printer's port: permission denied")
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("logged %d times, want 1:\n%s", got, buf.String())
+	}
+
+	openMu.Lock()
+	allowed = true
+	openMu.Unlock()
+	waitFor(t, "connection", func() bool { return p.Status().Connected })
+}
