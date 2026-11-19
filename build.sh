@@ -14,8 +14,15 @@ mkdir -p dist .cache
 
 VERSION=${TRAMLINE_VERSION:-dev-$(date -u +%Y%m%d%H%M%S)}
 
+# Rootless Docker maps the container's root to this user, and any other user to
+# a subordinate ID that can't write the cache or dist/, so root is used there.
+user="$(id -u):$(id -g)"
+case "$(docker info -f '{{.SecurityOptions}}')" in
+*rootless*) user=0:0 ;;
+esac
+
 in_container() {
-	docker run --rm --network none --user "$(id -u):$(id -g)" \
+	docker run --rm --network none --user "$user" \
 		--mount "type=bind,src=$PWD,dst=/src,readonly" \
 		--mount "type=bind,src=$PWD/dist,dst=/src/dist" \
 		--mount "type=bind,src=$PWD/.cache,dst=/cache" \
