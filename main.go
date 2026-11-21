@@ -69,7 +69,7 @@ Client:
                                                  copy a file on the Pi to the SD card, with the
                                                  printer on, also how to retry a failed copy
   tramline copy --cancel                         stop the running copy
-  tramline files [--json]                        list files on the Pi and the SD card
+  tramline files [--full] [--json]               list files on the Pi and the SD card, with SHA-256 sums
   tramline files rm <file>                       delete a file, and its copy on the card
   tramline print <file> --from pi|sd --bed-clear
                                                  turn the printer on if needed, heat, check tram,
@@ -827,11 +827,11 @@ func printCopyStatus(w io.Writer, job *server.CopyJob) {
 	switch {
 	case job == nil:
 	case job.State == server.CopyRunning:
-		fmt.Fprintf(w, "Copy:     %s to SD, %d of %d lines\n", job.Name, job.Lines, job.TotalLines)
+		fmt.Fprintf(w, "Copy:     %s (%s) to SD, %d of %d lines\n", job.Name, sumText(job.SHA256, false), job.Lines, job.TotalLines)
 	case job.State == server.CopyFailed:
 		fmt.Fprintf(w, "Copy:     %s failed: %s\n", job.Name, job.Error)
 	default:
-		fmt.Fprintf(w, "Copy:     %s is on the SD card as %s, size checked\n", job.Name, job.SDName)
+		fmt.Fprintf(w, "Copy:     %s is on the SD card as %s, size checked, %s sent\n", job.Name, job.SDName, sumText(job.SHA256, false))
 	}
 }
 
@@ -884,6 +884,9 @@ func printPrintStatus(w io.Writer, job *server.PrintJob) {
 		fmt.Fprintf(w, "Print:    %s failed: %s\n", job.Name, job.Error)
 	default:
 		fmt.Fprintf(w, "Print:    %s %s\n", job.Name, job.State)
+	}
+	if job.SHA256 != "" {
+		fmt.Fprintf(w, "          File: %s\n", sumText(job.SHA256, false))
 	}
 	if job.PreCheck && job.FinishedAt == nil {
 		fmt.Fprintf(w, "          This only checks tram for scheduled print %d, and the file won't start now\n", job.ScheduleID)
@@ -1039,6 +1042,9 @@ func runScheduleList(args []string) error {
 	}
 	for _, p := range prints {
 		fmt.Printf("%d  %s  %s from the %s  %s\n", p.ID, scheduleTime(p.At), p.Name, fromWord(p.From), p.State)
+		if p.SHA256 != "" {
+			fmt.Printf("     File: %s\n", sumText(p.SHA256, false))
+		}
 		if c := p.Check; c != nil {
 			fmt.Printf("     Check when scheduling: %s, range %.3f mm\n", passWord(c.Pass), c.Range)
 		}
@@ -1124,8 +1130,11 @@ func runUpload(args []string) error {
 	}
 	rec, err := c.File(name)
 	switch {
-	case err == nil && rec.SHA256 == hash:
+	case err == nil && rec.SHA256 == hash && (rec.Disk == nil || rec.Disk.Match || rec.Disk.Error != ""):
 		fmt.Printf("%s is already on the Pi, not sending it again\n", name)
+		if d := rec.Disk; d != nil && d.Error != "" {
+			fmt.Printf("Its file on the Pi wasn't checked just now: %s\n", d.Error)
+		}
 	case err == nil || errors.Is(err, client.ErrNotFound):
 		f, err := os.Open(path)
 		if err != nil {
@@ -1141,7 +1150,7 @@ func runUpload(args []string) error {
 	default:
 		return err
 	}
-	fmt.Printf("%d commands, %d bytes on the card without comments\n", rec.Info.Lines, rec.Info.SDSize)
+	fmt.Printf("%s, %d commands, %d bytes on the card without comments\n", sumText(hash, false), rec.Info.Lines, rec.Info.SDSize)
 
 	fmt.Printf("To print it from the Pi: tramline print %s --from pi --bed-clear\n", name)
 	fmt.Printf("To print it from the card, copy it first, about %s: tramline copy %s\n", max(server.CopyEstimate(rec.Info).Round(time.Second), time.Second), name)
@@ -1243,11 +1252,12 @@ func runFiles(args []string) error {
 	}
 	fs := flag.NewFlagSet("files", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print JSON")
+	full := fs.Bool("full", false, "show whole SHA-256 sums, not their first 12 digits")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return errors.New("usage: tramline files [--json], or tramline files rm <name>")
+		return errors.New("usage: tramline files [--full] [--json], or tramline files rm <name>")
 	}
 	c, err := loggedIn()
 	if err != nil {
@@ -1262,19 +1272,35 @@ func runFiles(args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	}
-	printFiles(os.Stdout, out)
+	printFiles(os.Stdout, out, *full)
 	return nil
 }
 
-func printFiles(w io.Writer, out server.FilesResponse) {
+// sumText shows a SHA-256 the way sha256sum starts, so the two can be compared.
+func sumText(sha string, full bool) string {
+	if sha == "" {
+		return "sha256 " + strings.Repeat("?", 12)
+	}
+	if full {
+		return "sha256 " + sha
+	}
+	return "sha256 " + server.ShortSum(sha)
+}
+
+func printFiles(w io.Writer, out server.FilesResponse, full bool) {
 	fmt.Fprintln(w, "On the Pi:")
 	if len(out.Files) == 0 {
 		fmt.Fprintln(w, "  nothing")
 	}
 	ours := map[string]bool{}
+	sums := map[string]string{}
 	for _, rec := range out.Files {
 		ours[strings.ToUpper(rec.SDName)] = true
+		sums[rec.Name] = rec.SHA256
 		state := "not on the SD card"
+		if rec.OnCard && rec.CardSHA256 != "" {
+			state = "an older version is on the SD card as " + rec.SDName
+		}
 		switch rec.SDState {
 		case server.CopyDone:
 			state = "on the SD card as " + rec.SDName
@@ -1283,7 +1309,14 @@ func printFiles(w io.Writer, out server.FilesResponse) {
 		case server.CopyFailed:
 			state = "COPY FAILED: " + rec.SDError
 		}
-		fmt.Fprintf(w, "  %-40s %10d bytes  %s\n", rec.Name, rec.Size, state)
+		fmt.Fprintf(w, "  %-40s %10d bytes  %s  %s\n", rec.Name, rec.Size, sumText(rec.SHA256, full), state)
+		switch d := rec.Disk; {
+		case d == nil:
+		case d.Error != "":
+			fmt.Fprintf(w, "  %40s   the file on the Pi wasn't checked: %s\n", "", d.Error)
+		case !d.Match:
+			fmt.Fprintf(w, "  %40s   DAMAGED ON THE PI: it reads as %s now, upload it again\n", "", sumText(d.SHA256, full))
+		}
 	}
 	if out.Card == nil {
 		fmt.Fprintf(w, "On the SD card: can't say, %s\n", out.CardNote)
@@ -1295,9 +1328,20 @@ func printFiles(w io.Writer, out server.FilesResponse) {
 	}
 	for _, f := range out.Card {
 		origin := "not from here"
-		if ours[strings.ToUpper(f.Name)] {
+		switch {
+		case f.Upload != "":
+			origin = "copied from " + f.Upload
+		case ours[strings.ToUpper(f.Name)]:
 			origin = "from here"
 		}
-		fmt.Fprintf(w, "  %-40s %10d bytes  %s\n", f.Name, f.Size, origin)
+		if f.Note != "" {
+			origin += ", sum not known: " + f.Note
+		} else if f.SHA256 != "" && f.SHA256 != sums[f.Upload] {
+			origin += ", AN OLDER VERSION than the Pi's"
+		}
+		fmt.Fprintf(w, "  %-40s %10d bytes  %s  %s\n", f.Name, f.Size, sumText(f.SHA256, full), origin)
+	}
+	if len(out.Card) > 0 {
+		fmt.Fprintln(w, "The card can't be read back, so its sums are of what the Pi sent in a copy whose size then checked out")
 	}
 }

@@ -85,6 +85,9 @@ type PrintJob struct {
 	SDName string `json:"sd_name"`
 	Mode   string `json:"mode"`
 	State  string `json:"state"`
+	// SHA256 is the file it prints: from the Pi, checked on the disk just before, and
+	// from the card, the bytes sent in its copy. It's empty for a print from elsewhere.
+	SHA256 string `json:"sha256,omitempty"`
 	// Elsewhere means it wasn't started here, such as from the LCD.
 	Elsewhere bool `json:"elsewhere,omitempty"`
 	// ScheduleID is the scheduled print this job belongs to.
@@ -524,9 +527,17 @@ func (s *Server) beginPrint(ctx context.Context, name, from string, scheduleID i
 	if code, why := s.printerBlocker(ctx); why != "" {
 		return PrintJob{}, code, why
 	}
-	mode, sdName := ModeStream, ""
+	mode, sdName, sha := ModeStream, "", rec.SHA256
+	if from == FromPi {
+		// A file damaged on the Pi's disk since its upload mustn't be printed.
+		if check := s.diskCheck(rec, true); check.Error != "" {
+			return PrintJob{}, http.StatusInternalServerError, fmt.Sprintf("can't read %s on the Pi: %s", name, check.Error)
+		} else if !check.Match {
+			return PrintJob{}, http.StatusConflict, damagedText(rec, check.SHA256)
+		}
+	}
 	if from == FromSD {
-		mode, sdName = ModeSD, rec.SDName
+		mode, sdName, sha = ModeSD, rec.SDName, rec.CardSHA256
 		listed, err := s.Card.ListSD(ctx)
 		if err != nil {
 			return PrintJob{}, printerErrorCode(err), fmt.Sprintf("can't read the card: %v", err)
@@ -548,7 +559,7 @@ func (s *Server) beginPrint(ctx context.Context, name, from string, scheduleID i
 	}
 	now := s.now()
 	job := s.beginPrep(&PrintJob{
-		Name: name, SDName: sdName, Mode: mode, State: PrintHeating,
+		Name: name, SDName: sdName, Mode: mode, State: PrintHeating, SHA256: sha,
 		Size: rec.Info.SDSize, StartedAt: now, MovedAt: now,
 		ScheduleID: scheduleID, PreCheck: preCheck,
 	})

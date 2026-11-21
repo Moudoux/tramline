@@ -84,13 +84,14 @@ type Server struct {
 	// Now is the clock, replaced in tests.
 	Now func() time.Time
 
-	heat  heatState
-	tram  tramState
-	files fileState
-	print printState
-	sched scheduleState
-	web   webState
-	ctx   context.Context
+	heat   heatState
+	tram   tramState
+	files  fileState
+	hashes hashState
+	print  printState
+	sched  scheduleState
+	web    webState
+	ctx    context.Context
 }
 
 // baseCtx is what work that outlives a request runs under.

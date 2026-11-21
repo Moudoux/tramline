@@ -30,8 +30,13 @@ function addSpan(parent, className, text) {
   parent.append(span);
 }
 
+let shownSchedules = "";
 function showSchedules(list) {
   const items = list || [];
+  // Redrawing would close a tip that's open.
+  const key = JSON.stringify(items.map((p) => [p.id, p.state, p.reason, p.sha256, p.at]));
+  if (key === shownSchedules) return;
+  shownSchedules = key;
   $("scheduled").hidden = items.length === 0;
   $("scheduled-list").replaceChildren(...items.map((p) => {
     const li = document.createElement("li");
@@ -41,6 +46,9 @@ function showSchedules(list) {
     addSpan(li, "when", scheduleWhen(p.at));
     const from = p.from === "sd" ? "card" : "Pi";
     addSpan(li, "what", `${p.name}, from the ${from}, ${SCHEDULE_TEXT[p.state] || p.state}`);
+    if (p.sha256) li.lastChild.append(" ", sumIcon(p.sha256, "The file it prints", [p.from === "sd"
+      ? "The copy on the card, as the Pi sent it, when this was scheduled."
+      : "Its upload's, when this was scheduled. It's checked on the Pi's disk again before it starts."]));
     if (p.reason) addSpan(li, "why", p.reason);
     return li;
   }));
@@ -62,7 +70,7 @@ function showStatus(st) {
   } else if (st.copy) {
     [text, kind] = ["copying to card", "active"];
     const pct = st.copy.total_bytes > 0 ? Math.floor((100 * st.copy.bytes) / st.copy.total_bytes) : 0;
-    message = `${st.copy.name}: ${pct}%`;
+    message = `${pct}% copied.`;
   } else if (job) {
     [text, kind, message] = STATE_TEXT[job.state] || [job.state, "", ""];
   } else {
@@ -71,7 +79,9 @@ function showStatus(st) {
   badge.textContent = text;
   badge.className = "badge" + (kind ? " " + kind : "");
 
-  $("file").textContent = job ? job.name : "";
+  if (job) setFileLine($("file"), job.name, jobSum(job), [job.id, job.sha256]);
+  else if (st.copy) setFileLine($("file"), st.copy.name, st.copy.sha256 ? sumIcon(st.copy.sha256, "The file being copied to the card", ["Its upload's sum, which what the Pi reads and sends must match."]) : null, ["copy", st.copy.sha256]);
+  else setFileLine($("file"), "", null, null);
   $("nozzle").textContent = st.temps ? temp(st.temps.nozzle, st.temps.nozzle_target) : "–";
   $("bed").textContent = st.temps ? temp(st.temps.bed, st.temps.bed_target) : "–";
   $("version").textContent = `Tramline ${st.version}${st.simulated ? ", simulated printer" : ""}`;

@@ -426,7 +426,15 @@ func TestFileTroubleMidStreamStopsThePrinter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(gcodeOf(5)+"M28 NOPE\n"), 0o640); err != nil {
+	bad := gcodeOf(5) + "M28 NOPE\n"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(bad), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// The record says it's this file, so it gets past the check at the start, as a file
+	// changing after that would.
+	rec := r.record(t, name)
+	rec.SHA256 = hashOf(bad)
+	if err := r.s.saveRecord(rec); err != nil {
 		t.Fatal(err)
 	}
 	r.startPrint(t, name)

@@ -305,7 +305,9 @@ function showNow() {
   badge.textContent = text;
   badge.className = "badge" + (kind ? " " + kind : "");
 
-  $("file").textContent = focus ? focus.name : st.copy ? st.copy.name : "";
+  if (focus) setFileLine($("file"), focus.name, jobSum(focus), [focus.id, focus.sha256]);
+  else if (st.copy) setFileLine($("file"), st.copy.name, st.copy.sha256 ? sumIcon(st.copy.sha256, "The file being copied", ["Its upload's sum, which what the Pi reads and sends must match."]) : null, ["copy", st.copy.sha256]);
+  else setFileLine($("file"), "", null, null);
   $("nozzle").textContent = st.temps ? temp(st.temps.nozzle, st.temps.nozzle_target) : "–";
   $("bed").textContent = st.temps ? temp(st.temps.bed, st.temps.bed_target) : "–";
 
@@ -628,6 +630,9 @@ $("files-refresh").addEventListener("click", loadFiles);
 
 let openFile = null;
 
+// The server's word for a copy whose size checked out on the card.
+const COPY_DONE = "verified";
+
 function cardState(rec) {
   const running = page && page.copy && page.copy.name === rec.name;
   if (running) {
@@ -635,10 +640,11 @@ function cardState(rec) {
     return ["copying " + pct + "%", "active"];
   }
   switch (rec.sd_state) {
-    case "done": return ["on card", "good"];
+    case COPY_DONE: return ["on card", "good"];
     case "running": return ["copying", "active"];
     case "failed": return ["copy failed", "bad"];
   }
+  if (rec.on_card && rec.card_sha256) return ["older copy on card", ""];
   return ["Pi only", ""];
 }
 
@@ -666,17 +672,55 @@ function showFiles() {
   if (files.card && card.length === 0) {
     $("card-files").replaceChildren(el("li", "empty", "Nothing on the card."));
   } else {
+    const sums = new Map(list.map((r) => [r.name, r.sha256]));
     $("card-files").replaceChildren(...card.map((f) => {
       const li = el("li", "compact");
       const main = el("div", "item-main");
       const text = el("div", "item-text");
-      text.append(el("span", "item-name", f.name), el("span", "item-meta", bytes(f.size)));
-      main.append(text, el("span", "chip" + (ours.has(f.name.toUpperCase()) ? " good" : ""), ours.has(f.name.toUpperCase()) ? "from here" : "not from here"));
+      const ourFile = !!f.upload || ours.has(f.name.toUpperCase());
+      const older = f.sha256 && f.upload && sums.has(f.upload) && sums.get(f.upload) !== f.sha256;
+      text.append(nameWithSum(f.name, cardSum(f, older)), el("span", "item-meta", f.upload ? `${bytes(f.size)} · copied from ${f.upload}` : bytes(f.size)));
+      const [chip, kind] = older ? ["older version", "bad"] : ourFile ? ["from here", "good"] : ["not from here", ""];
+      main.append(text, el("span", "chip " + kind, chip));
       li.append(main);
       return li;
     }));
   }
   applyBusy();
+}
+
+// piSum is the icon for a file on the Pi, from the server's fresh read of its disk.
+function piSum(rec) {
+  const d = rec.disk;
+  const up = `Uploaded ${shortTime(rec.uploaded_at)}.`;
+  if (d && d.sha256 && !d.match) {
+    return sumIcon(d.sha256, "DAMAGED: the file on the Pi now reads as", [
+      `At ${clockAt(d.checked_at)}, it didn't match its upload, which was ${shortSum(rec.sha256)}.`,
+      "Upload it again before printing it.",
+    ], "bad");
+  }
+  if (d && d.sha256) return sumIcon(rec.sha256, "SHA-256 of the file on the Pi", [up, `Read from the Pi's disk at ${clockAt(d.checked_at)}, and it matches its upload.`]);
+  return sumIcon(rec.sha256, "SHA-256 of the file on the Pi", [up, d && d.error ? `As uploaded. Not read from the disk just now: ${d.error}.` : "As uploaded."]);
+}
+
+// nameWithSum is a name with its icon after it.
+function nameWithSum(name, icon, className = "item-name") {
+  const span = el("span", className, name);
+  span.append(" ", icon);
+  return span;
+}
+
+// cardSum is the icon for a file on the card. The card can't be read back, so the sum
+// is what the Pi sent in the copy.
+function cardSum(f, older) {
+  const how = "What the Pi sent in its copy, whose size then checked out on the card. The card can't be read back over USB.";
+  if (!f.sha256) {
+    return sumIcon("", "SHA-256 of the file on the card", [
+      f.upload ? `Not known: ${f.note || "no copy was checked"}.` : "Not known: it wasn't copied from here, and the card can't be read back over USB.",
+    ], "unknown");
+  }
+  if (older) return sumIcon(f.sha256, "SHA-256 of the file on the card", [how, `It's an older version: ${f.upload} on the Pi is ${shortSum(files.files.find((r) => r.name === f.upload).sha256)} now. Copy it again to print the new one from the card.`], "bad");
+  return sumIcon(f.sha256, "SHA-256 of the file on the card", [how]);
 }
 
 function fileItem(rec) {
@@ -685,7 +729,10 @@ function fileItem(rec) {
   const main = el("div", "item-main");
   const text = el("div", "item-text");
   const meta = [bytes(rec.size), `${rec.info.lines.toLocaleString()} lines`, `uploaded ${shortTime(rec.uploaded_at)}`];
-  text.append(el("span", "item-name", rec.name), el("span", "item-meta", meta.join(" · ")));
+  text.append(nameWithSum(rec.name, piSum(rec)), el("span", "item-meta", meta.join(" · ")));
+  if (rec.disk && rec.disk.sha256 && !rec.disk.match) {
+    text.append(el("span", "item-why bad", "Damaged on the Pi: it no longer matches its upload. Upload it again."));
+  }
   if (rec.sd_state === "failed" && rec.sd_error) text.append(el("span", "item-why bad", rec.sd_error));
   const [chipText, chipKind] = cardState(rec);
   main.append(text, el("span", "chip " + chipKind, chipText));
@@ -694,7 +741,7 @@ function fileItem(rec) {
   const actions = el("div", "item-actions");
   const printBtn = button("Print…", "primary small", () => openRun("print", rec.name));
   const schedBtn = button("Schedule…", "small", () => openRun("schedule", rec.name));
-  const onCard = rec.sd_state === "done";
+  const onCard = rec.sd_state === COPY_DONE;
   const copyBtn = button(rec.sd_state === "failed" ? "Copy again" : "Copy to card", "small", (b) => copyFile(b, rec));
   const delBtn = button("Delete", "danger small", (b) => deleteFile(b, rec));
   for (const b of [printBtn, schedBtn, copyBtn, delBtn]) b.dataset.needsIdle = "";
@@ -940,10 +987,11 @@ function openRun(mode, name) {
 function updateRun() {
   const list = (files && files.files) || [];
   const rec = list.find((r) => r.name === $("run-file").value);
-  const onCard = rec && rec.sd_state === "done";
+  const onCard = rec && rec.sd_state === COPY_DONE;
   const [pi, sd] = document.querySelectorAll('input[name="run-from"]');
   sd.disabled = !onCard;
   $("run-sd-note").textContent = onCard ? `Prints the copy on the card, ${rec.sd_name}.` : "Copy it to the card first, from the file list.";
+  setFileLine($("run-sum"), rec ? `SHA-256 ${shortSum(rec.sha256)}` : "", rec ? piSum(rec) : null, rec && [rec.name, rec.sha256, rec.disk]);
   // With both possible, it's the user's choice, as it is in the CLI.
   if (!onCard) {
     sd.checked = false;
@@ -1029,7 +1077,10 @@ function showSchedules() {
     const main = el("div", "item-main");
     const text = el("div", "item-text");
     text.append(el("span", "item-name", scheduleWhen(p.at)));
-    text.append(el("span", "item-meta", `${p.name}, from the ${p.from === "sd" ? "card" : "Pi"}`));
+    const where = `${p.name}, from the ${p.from === "sd" ? "card" : "Pi"}`;
+    text.append(p.sha256 ? nameWithSum(where, sumIcon(p.sha256, "The file it prints", [p.from === "sd"
+      ? "The copy on the card, as the Pi sent it, when this was scheduled."
+      : "Its upload's, when this was scheduled. It's checked on the Pi's disk again before it starts."]), "item-meta") : el("span", "item-meta", where));
     if (p.check) text.append(el("span", "item-meta", checkText("Check when scheduling", p.check)));
     if (p.final_check) text.append(el("span", "item-meta", checkText("Check at its time", p.final_check)));
     if (p.reason) text.append(el("span", "item-why" + (SCHEDULE_BAD.includes(p.state) && p.reason !== "cancelled on request" ? " bad" : ""), p.reason));

@@ -80,18 +80,28 @@ type FileRecord struct {
 	// SDState is empty, or the state of the last copy.
 	SDState string `json:"sd_state,omitempty"`
 	SDError string `json:"sd_error,omitempty"`
+	// CardSHA256 is the SHA-256 of the bytes read from the Pi for the last copy whose
+	// size checked out on the card. The card can't be read back, so this is what was
+	// sent, not what was read there. It stays after a new upload, as that copy is still
+	// on the card, and empties when a copy starts.
+	CardSHA256 string `json:"card_sha256,omitempty"`
+	CardSize   int64  `json:"card_size,omitempty"`
+	// Disk is a fresh check of the file on the Pi, in listings only.
+	Disk *DiskCheck `json:"disk,omitempty"`
 }
 
 // CopyJob is one copy to the card, and is what status reports.
 type CopyJob struct {
-	ID         int        `json:"id"`
-	Name       string     `json:"name"`
-	SDName     string     `json:"sd_name"`
-	State      string     `json:"state"`
-	Lines      int        `json:"lines"`
-	TotalLines int        `json:"total_lines"`
-	Bytes      int64      `json:"bytes"`
-	TotalBytes int64      `json:"total_bytes"`
+	ID         int    `json:"id"`
+	Name       string `json:"name"`
+	SDName     string `json:"sd_name"`
+	State      string `json:"state"`
+	Lines      int    `json:"lines"`
+	TotalLines int    `json:"total_lines"`
+	Bytes      int64  `json:"bytes"`
+	TotalBytes int64  `json:"total_bytes"`
+	// SHA256 is the upload's, which the bytes sent must match.
+	SHA256     string     `json:"sha256"`
 	Window     int        `json:"window"`
 	Resends    int        `json:"resends"`
 	Timeouts   int        `json:"timeouts"`
@@ -119,8 +129,49 @@ type FilesResponse struct {
 	Files []FileRecord `json:"files"`
 	// Card is what's on the card, including files from elsewhere. It's nil if that
 	// can't be read right now, and CardNote says why.
-	Card     []marlin.SDFile `json:"card"`
-	CardNote string          `json:"card_note,omitempty"`
+	Card     []CardFile `json:"card"`
+	CardNote string     `json:"card_note,omitempty"`
+}
+
+// CardFile is a file on the card. For one copied from here, Upload names the file on
+// the Pi, and SHA256 is the bytes sent in its last checked copy, if the size on the
+// card still matches.
+type CardFile struct {
+	marlin.SDFile
+	Upload string `json:"upload,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
+	// Note says why a file from here has no SHA256.
+	Note string `json:"note,omitempty"`
+}
+
+// cardFiles matches the card's listing with the records.
+func cardFiles(listed []marlin.SDFile, records []FileRecord) []CardFile {
+	if listed == nil {
+		return nil
+	}
+	out := make([]CardFile, 0, len(listed))
+	for _, f := range listed {
+		item := CardFile{SDFile: f}
+		i := slices.IndexFunc(records, func(r FileRecord) bool { return r.OnCard && strings.EqualFold(r.SDName, f.Name) })
+		if i >= 0 {
+			rec := records[i]
+			item.Upload = rec.Name
+			switch {
+			case rec.SDState == CopyRunning:
+				item.Note = "being copied now"
+			case rec.SDState == CopyFailed:
+				item.Note = "its last copy failed, so it may be partial"
+			case rec.CardSHA256 == "":
+				item.Note = "copied before checksums were kept, tramline copy " + rec.Name + " copies it again"
+			case f.Size != rec.CardSize:
+				item.Note = fmt.Sprintf("it's %d bytes on the card, but its copy was %d", f.Size, rec.CardSize)
+			default:
+				item.SHA256 = rec.CardSHA256
+			}
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // CopyEstimate is roughly how long a file takes to copy to the card.
@@ -216,6 +267,7 @@ func writeAtomic(path string, data []byte) error {
 }
 
 func (s *Server) saveRecord(rec FileRecord) error {
+	rec.Disk = nil
 	dir, err := s.uploadsDir()
 	if err != nil {
 		return err
@@ -372,6 +424,9 @@ func (s *Server) handleFilePut(w http.ResponseWriter, r *http.Request) {
 	switch old, err := s.loadRecord(name); {
 	case err == nil:
 		rec.SDName, rec.OnCard = old.SDName, old.OnCard
+		if old.SDState == CopyDone {
+			rec.CardSHA256, rec.CardSize = old.CardSHA256, old.CardSize
+		}
 	case errors.Is(err, os.ErrNotExist):
 		rec.SDName, err = s.pickSDName(name)
 		if err != nil {
@@ -416,14 +471,19 @@ func (s *Server) handleFileGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.files.mu.Lock()
-	defer s.files.mu.Unlock()
 	rec, err := s.loadRecord(name)
+	s.files.mu.Unlock()
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		writeError(w, http.StatusNotFound, name+" isn't on the server")
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, err.Error())
 	default:
+		// upload asks for this to decide whether to send the file again, so it's read
+		// afresh, unless a print or a copy is running.
+		s.hashes.run.Lock()
+		rec.Disk = s.diskCheck(rec, !s.printRunning() && !s.copyRunning())
+		s.hashes.run.Unlock()
 		writeJSON(w, http.StatusOK, rec)
 	}
 }
@@ -431,15 +491,16 @@ func (s *Server) handleFileGet(w http.ResponseWriter, r *http.Request) {
 // handleFiles never waits: if the printer is busy, the card's listing is left out.
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	var out FilesResponse
-	out.Card, out.CardNote = s.readCard(r.Context())
+	listed, note := s.readCard(r.Context())
 	s.files.mu.Lock()
-	defer s.files.mu.Unlock()
-	var err error
-	out.Files, err = s.loadRecords()
+	records, err := s.loadRecords()
+	s.files.mu.Unlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.checkRecords(records)
+	out.Files, out.Card, out.CardNote = records, cardFiles(listed, records), note
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -557,7 +618,7 @@ func (s *Server) handleCopy(w http.ResponseWriter, r *http.Request) {
 	case exists && !rec.OnCard:
 		writeError(w, http.StatusConflict, fmt.Sprintf("refusing to copy: %s is already on the card and didn't come from here, and M28 would overwrite it", rec.SDName))
 		return
-	case exists && rec.SDState == CopyDone && found.Size == rec.Info.SDSize:
+	case exists && rec.SDState == CopyDone && found.Size == rec.Info.SDSize && rec.CardSHA256 == rec.SHA256:
 		writeJSON(w, http.StatusOK, CopyResponse{File: rec})
 		return
 	}
@@ -567,12 +628,12 @@ func (s *Server) handleCopy(w http.ResponseWriter, r *http.Request) {
 	s.files.ids++
 	job := &CopyJob{
 		ID: s.files.ids, Name: name, SDName: rec.SDName, State: CopyRunning,
-		TotalLines: rec.Info.Lines, TotalBytes: rec.Info.SDSize, Window: window, StartedAt: s.now(),
+		TotalLines: rec.Info.Lines, TotalBytes: rec.Info.SDSize, SHA256: rec.SHA256, Window: window, StartedAt: s.now(),
 	}
 	s.files.job, s.files.cancel = job, cancel
 	out := *job
 	// Saved before M28, which can create the file even if its reply goes missing.
-	rec.OnCard, rec.SDState, rec.SDError = true, CopyRunning, ""
+	rec.OnCard, rec.SDState, rec.SDError, rec.CardSHA256, rec.CardSize = true, CopyRunning, "", "", 0
 	err = s.saveRecord(rec)
 	if err != nil {
 		job.State, job.Error = CopyFailed, err.Error()
@@ -594,13 +655,15 @@ func (s *Server) runCopy(ctx context.Context, cancel context.CancelCauseFunc, jo
 	s.heat.op.Lock()
 	defer s.heat.op.Unlock()
 
-	err := s.writeAndVerify(ctx, job, rec)
+	sent, err := s.writeAndVerify(ctx, job, rec)
 	// The copy's own reason for stopping is more use than "context canceled".
 	if err != nil && ctx.Err() != nil {
 		err = fmt.Errorf("stopped: %w", context.Cause(ctx))
 	}
 	rec.SDState, rec.SDError = CopyDone, ""
-	if err != nil {
+	if err == nil {
+		rec.CardSHA256, rec.CardSize = sent, rec.Info.SDSize
+	} else {
 		rec.SDState, rec.SDError = CopyFailed, err.Error()
 		// A partial file mustn't be left where the LCD could print it. If the link
 		// is gone this fails, and the next copy overwrites the file.
@@ -626,37 +689,48 @@ func (s *Server) runCopy(ctx context.Context, cancel context.CancelCauseFunc, jo
 		job.ID, job.State, elapsed, job.Lines, job.TotalLines, job.Resends, job.Timeouts, job.Error)
 }
 
-func (s *Server) writeAndVerify(ctx context.Context, job *CopyJob, rec FileRecord) error {
+// writeAndVerify returns the SHA-256 of what it read from the Pi, which must be the
+// upload's, as the card can't be read back to check its contents.
+func (s *Server) writeAndVerify(ctx context.Context, job *CopyJob, rec FileRecord) (string, error) {
 	dir, err := s.uploadsDir()
 	if err != nil {
-		return err
+		return "", err
 	}
 	f, err := os.Open(filepath.Join(dir, rec.Name))
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer f.Close()
-	reader := gcode.NewReader(f)
+	read := newHashingReader(f)
+	reader := gcode.NewReader(read)
 	err = s.Card.WriteSD(ctx, rec.SDName, job.Window, reader.Next, func(p marlin.SDProgress) {
 		s.files.mu.Lock()
 		defer s.files.mu.Unlock()
 		job.Lines, job.Bytes, job.Resends, job.Timeouts = p.Lines, p.Bytes, p.Resends, p.Timeouts
 	})
 	if err != nil {
-		return err
+		return "", err
+	}
+	// The reader stops at the end, so this only reads anything if it didn't.
+	if _, err := io.Copy(io.Discard, read); err != nil {
+		return "", err
+	}
+	sent := read.sum()
+	if sent != rec.SHA256 {
+		return "", errors.New(damagedText(rec, sent) + ", then copy it")
 	}
 	listed, err := s.Card.ListSD(context.WithoutCancel(ctx))
 	if err != nil {
-		return fmt.Errorf("the copy finished, but the card can't be read to check it: %w", err)
+		return "", fmt.Errorf("the copy finished, but the card can't be read to check it: %w", err)
 	}
 	found, exists := findOnCard(listed, rec.SDName)
 	switch {
 	case !exists:
-		return fmt.Errorf("the copy finished, but %s isn't on the card", rec.SDName)
+		return "", fmt.Errorf("the copy finished, but %s isn't on the card", rec.SDName)
 	case found.Size != rec.Info.SDSize:
-		return fmt.Errorf("%s is %d bytes on the card, it should be %d", rec.SDName, found.Size, rec.Info.SDSize)
+		return "", fmt.Errorf("%s is %d bytes on the card, it should be %d", rec.SDName, found.Size, rec.Info.SDSize)
 	}
-	return nil
+	return sent, nil
 }
 
 func (s *Server) handleCopyCancel(w http.ResponseWriter, r *http.Request) {

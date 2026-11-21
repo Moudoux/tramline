@@ -11,6 +11,7 @@ The name joins bed **tram**ming with the serial **line** to the printer.
 - **Tram checks:** probes the four corners, with an inset and repeats if wanted, and says which knob to turn and which way. Every print and scheduled print checks first and won't start out of tram.
 - **Bed mesh:** reads the mesh the printer holds, with no movement, reads each print's fresh mesh before the plug is cut, and keeps a history of them.
 - **Files:** uploads G-code to the Pi, lists and deletes files, and copies files to the printer's SD card at about 14 KB/s, with cancel and retry.
+- **Checksums:** `files` shows each file's SHA-256, its first 12 digits as `sha256sum` starts, or whole with `--full`, on the Pi and on the card. The Pi's files are read from its disk again when listed, at most every 10 minutes, and a file that no longer matches its upload is shown as damaged, and isn't copied or streamed. The card can't be read back over USB, so a card file's sum is what the Pi sent in a copy whose size then checked out. `status`, `schedule list` and both web pages show the sum of the file being printed, copied or scheduled, the web pages behind an "i" to hover or tap.
 - **Printing two ways:** streams the file from the Pi line by line, or prints from the SD card, which carries on if the Pi goes down.
 - **Scheduling:** checks tram now, powers off, then at the set time powers on, checks again and prints unattended. It cancels itself if the check fails or another print has started since.
 - **Stopping:** cancels a print with the heaters off, or an emergency stop with `M112` and the plug cut.
@@ -99,7 +100,7 @@ Keep the bed clear until it prints. If any print has started since you scheduled
 | `tram --bed-clear` | Probe the corners and report |
 | `upload <path>` | Save a file on the Pi, nothing else |
 | `copy <file>`, `copy --cancel` | Copy a file on the Pi to the card, or stop a copy |
-| `files`, `files rm <file>` | List files, or delete one from both the Pi and the card |
+| `files [--full]`, `files rm <file>` | List files with their SHA-256 sums, or delete one from both the Pi and the card |
 | `print <file> --from pi\|sd --bed-clear` | Turn on if needed, heat, check tram, print, then turn off once cool |
 | `print --continue` | Check tram again, after turning a knob |
 | `cancel` | Cancel the print and turn the heaters off |

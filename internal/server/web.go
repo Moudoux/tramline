@@ -53,6 +53,7 @@ type WebStatus struct {
 type WebSchedule struct {
 	ID     int       `json:"id"`
 	Name   string    `json:"name"`
+	SHA256 string    `json:"sha256,omitempty"`
 	From   string    `json:"from"`
 	At     time.Time `json:"at"`
 	State  string    `json:"state"`
@@ -62,12 +63,13 @@ type WebSchedule struct {
 
 // WebPrint is the running or most recent print.
 type WebPrint struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Mode  string `json:"mode"`
-	State string `json:"state"`
-	Pos   int64  `json:"pos"`
-	Size  int64  `json:"size"`
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	SHA256 string `json:"sha256,omitempty"`
+	Mode   string `json:"mode"`
+	State  string `json:"state"`
+	Pos    int64  `json:"pos"`
+	Size   int64  `json:"size"`
 	// MovedAgo is how many seconds ago Pos last moved on, by the server's clock.
 	MovedAgo float64 `json:"moved_ago"`
 	// RunSeconds is how long the job has been going, up to its end.
@@ -86,6 +88,7 @@ type WebPrint struct {
 // WebCopy is a running copy to the card.
 type WebCopy struct {
 	Name       string `json:"name"`
+	SHA256     string `json:"sha256,omitempty"`
 	Bytes      int64  `json:"bytes"`
 	TotalBytes int64  `json:"total_bytes"`
 }
@@ -133,7 +136,7 @@ func (s *Server) handleWebStatus(w http.ResponseWriter, r *http.Request) {
 			end = *job.FinishedAt
 		}
 		out.Print = &WebPrint{
-			ID: job.ID, Name: job.Name, Mode: job.Mode, State: job.State,
+			ID: job.ID, Name: job.Name, SHA256: job.SHA256, Mode: job.Mode, State: job.State,
 			Pos: job.Pos, Size: job.Size,
 			MovedAgo:   now.Sub(job.MovedAt).Seconds(),
 			RunSeconds: end.Sub(job.StartedAt).Seconds(),
@@ -145,7 +148,7 @@ func (s *Server) handleWebStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if job := s.copyJob(); job != nil && job.State == CopyRunning {
-		out.Copy = &WebCopy{Name: job.Name, Bytes: job.Bytes, TotalBytes: job.TotalBytes}
+		out.Copy = &WebCopy{Name: job.Name, SHA256: job.SHA256, Bytes: job.Bytes, TotalBytes: job.TotalBytes}
 	}
 	out.Scheduled = s.webSchedules()
 	writeJSON(w, http.StatusOK, out)
@@ -155,7 +158,7 @@ func (s *Server) handleWebStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) webSchedules() []WebSchedule {
 	var coming, ended []WebSchedule
 	for _, p := range s.schedulesCopy() {
-		item := WebSchedule{ID: p.ID, Name: p.Name, From: p.From, At: p.At, State: p.State, Ended: p.ended(), Reason: p.Reason}
+		item := WebSchedule{ID: p.ID, Name: p.Name, SHA256: p.SHA256, From: p.From, At: p.At, State: p.State, Ended: p.ended(), Reason: p.Reason}
 		if item.Ended {
 			ended = append(ended, item)
 		} else {

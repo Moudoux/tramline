@@ -65,6 +65,8 @@ type ScheduledPrint struct {
 	From  string    `json:"from"`
 	At    time.Time `json:"at"`
 	State string    `json:"state"`
+	// SHA256 is the file's when it was scheduled. Uploads over it are refused meanwhile.
+	SHA256 string `json:"sha256,omitempty"`
 	// JobID is the print job now doing its work: the tram check when scheduling, then
 	// the print itself.
 	JobID int `json:"job_id,omitempty"`
@@ -363,6 +365,17 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, code, "refusing to schedule: "+why)
 		return
 	}
+	s.files.mu.Lock()
+	rec, err := s.loadRecord(in.Name)
+	s.files.mu.Unlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "refusing to schedule: "+err.Error())
+		return
+	}
+	sha := rec.SHA256
+	if in.From == FromSD {
+		sha = rec.CardSHA256
+	}
 
 	ctx := context.WithoutCancel(r.Context())
 	s.keepPowerOn()
@@ -376,10 +389,11 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 	s.sched.data.NextID++
 	p := &ScheduledPrint{
 		ID: s.sched.data.NextID, Name: in.Name, From: in.From, At: in.At.UTC(), State: SchedChecking, BedClearAt: now,
+		SHA256: sha,
 	}
 	s.sched.data.Prints = append(s.sched.data.Prints, p)
 	id := p.ID
-	err := s.saveSchedulesLocked()
+	err = s.saveSchedulesLocked()
 	if err != nil {
 		s.sched.data.Prints = slices.DeleteFunc(s.sched.data.Prints, func(q *ScheduledPrint) bool { return q == p })
 	}

@@ -26,7 +26,7 @@ Port `8726` is proposed, which spells TRAM on a phone keypad. Not currently in u
 | `tramline mesh [--raw] [--json]` | `GET /v1/mesh` | The mesh the printer holds now, from `M420 V1 T1`, which only prints. Nothing moves. Refused during a print, a tram check or a copy, and with the plug off. Run on the real printer 2026-11-06, see Built: mesh heights. Each print Tramline runs also reads it once after the print, into the job's `mesh_read` in `GET /v1/status` and `mesh-history.jsonl` |
 | `tramline upload <path>` | `GET` and `PUT /v1/files/<name>` | Save on the Pi unless it's already there, nothing else. Built |
 | `tramline copy <name> [--no-wait]`, `tramline copy --cancel` | `POST /v1/files/<name>/copy`, `POST /v1/copy/cancel` | Copy a file on the Pi to SD, which is also how to retry, or stop a copy. Built |
-| `tramline files [--json]`, `tramline files rm <name>` | `GET /v1/files`, `DELETE /v1/files/<name>` | List files on the Pi and the card, or delete one, with its copy on the card. Built |
+| `tramline files [--full] [--json]`, `tramline files rm <name>` | `GET /v1/files`, `DELETE /v1/files/<name>` | List files on the Pi and the card with their SHA-256 sums, see Checksums under Upload, or delete one, with its copy on the card. Built |
 | `tramline print <file> --from pi\|sd --bed-clear` | `POST /v1/print` | Turn on if needed, heat, check tram, print, turn off once cool; refused without the bed-clear confirmation. Built |
 | `tramline cancel` | `POST /v1/cancel` | Cancel with `M524`. Built, simulator only |
 | `tramline estop` | `POST /v1/estop` | `M112`, then cut the plug. Built, simulator only |

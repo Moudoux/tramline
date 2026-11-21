@@ -25,6 +25,7 @@ The record of Tramline's design, firmware findings, test results and open issues
 | Desktop GUI, `tramline gui` | Built 2026-11-05, with everything the client's commands do and uploads from the browser. `go test` and headless Chrome on the simulator only, not yet used with the real Pi. See Desktop GUI |
 | Mesh heights, `tramline mesh` | Built 2026-11-06: `M420 V1 T1`, read-only in the firmware's source, in the CLI and the GUI as text. `go test` and headless Chrome on the simulator only, installed 2026-11-06. **On the real printer 2026-11-06: the stored mesh after power-on, and a print's fresh mesh just after it ended. Mesh lines arrive during a card print too.** Read by itself after each print that probed a mesh, and drawn in the GUI as a coloured surface: built 2026-11-06, simulator only, not installed. See Built: mesh heights, and Built: mesh surface and the read after each print |
 | Probe view, the head live during a tram check and the mesh | Built 2026-11-05 for the GUI. Tram check: phase, target and step time in status, and the 3D view's probe points, moving head and reading pins. Mesh: each "Probing mesh point N/25." into the print job, and the 3D view's 5×5 grid filling in with the head at an estimated point, by UBL's order, which fits the real log's timing. `go test` and headless Chrome on the simulator only, not installed. On 2026-11-06 a card print showed the mesh lines arrive from the card too, and the user's video showed the real head following the assumed order. See Probe view |
+| Checksums in `files`, `status` and both web pages | Built 2026-11-21: the Pi's files read again when listed, checked before a stream and during a copy, the card's sum from the copy. `go test` and headless Chrome on the simulator only, not installed. See Checksums |
 | `tramline update` | Not started |
 
 ## Files
@@ -48,7 +49,7 @@ Read [next-session.md](next-session.md) first. Paths in the notes, such as `inte
 | [tram-before-printing.md](tram-before-printing.md) | The tram check before every print, the wizard, print --continue |
 | [scheduled-prints.md](scheduled-prints.md) | schedule, auto-off, --from pi|sd, CLI changes |
 | [tram-check.md](tram-check.md) | tramline tram: probing, limits, knob direction, history |
-| [upload.md](upload.md) | upload, copy, files, resends, SD speed |
+| [upload.md](upload.md) | upload, copy, files, resends, SD speed, checksums |
 | [hue-plug.md](hue-plug.md) | Pairing, plug UUID, power control |
 | [safety-and-heating.md](safety-and-heating.md) | Server-enforced safety rules, preheat, cool, idle timeout |
 | [testing-and-questions.md](testing-and-questions.md) | Test plan, open questions, to do outside the code |
@@ -168,6 +169,7 @@ The text refers to sections by name, as in "see Stand print result". Sections ma
 | · · Simulator tests | [upload.md](upload.md) |
 | · · LCD during a copy | [upload.md](upload.md) |
 | · · Still to confirm on the real printer | [upload.md](upload.md) |
+| Checksums | [upload.md](upload.md) |
 | Safety rules | [safety-and-heating.md](safety-and-heating.md) |
 | Heating | [safety-and-heating.md](safety-and-heating.md) |
 | · · Idle timeout | [safety-and-heating.md](safety-and-heating.md) |
