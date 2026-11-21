@@ -4,7 +4,7 @@ Part of the Tramline engineering notes, see the [index](README.md). Other sectio
 
 ## Packages
 
-Built 2026-11-21, at the user's request: a PKGBUILD for the client on Arch, and an arm64 `.deb` for the server on the Pi, which arch-config installs. **The `.deb` 0.1.0 is installed on the Pi, 2026-11-21. The Arch package isn't installed.** The version is in `VERSION` (0.1.0 to start), the PKGBUILD's `pkgver` must match it, and both packages build with it in place of a `dev-` time.
+Built 2026-11-21, at the user's request: a PKGBUILD for the client on Arch, and an arm64 `.deb` for the server on the Pi, which arch-config installs. **Both are installed, 2026-11-21: the `.deb` 0.1.0 on the Pi, and the Arch package 0.1.0-1 on the desktop, with `~/.local/bin/tramline` removed.** The version is in `VERSION` (0.1.0 to start), the PKGBUILD's `pkgver` must match it, and both packages build with it in place of a `dev-` time.
 
 - **Arch, `packaging/arch/PKGBUILD`:** the client binary in `/usr/bin/tramline`, and the README. It builds through `build.sh` in the pinned container, so it needs Docker rather than Go, and runs the tests too. `just arch-pkg` builds it, `makepkg -si` there installs it. Nothing for the server: no unit, user or data folder on the desktop. `~/.local/bin/tramline` from `just install` comes first on the PATH, so remove it with `just uninstall` once the package is installed.
 - **Pi, `packaging/build-deb.sh`, through `just deb`:** `dist/tramline_<version>_arm64.deb`, made with `dpkg-deb` (Arch's `dpkg` package, in arch-config's `dev` task). It checks the binary's version under `qemu-aarch64-static` before packaging. It holds:
