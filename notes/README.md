@@ -11,7 +11,7 @@ The record of Tramline's design, firmware findings, test results and open issues
 | HTTPS with mutual TLS and allow list | Done |
 | `init`, `allow`, `serve`, `keygen`, `login`, `status` | Done |
 | Hue pairing, plug listing, `power on\|off` | Done, tested on the real bridge and plug, including the refusal to power off while hot |
-| systemd unit, `deploy/install.sh` | Done, installed and running |
+| systemd unit, installed by the `.deb` (`deploy/install.sh` before it) | Done, installed and running |
 | `tram`, `tram info`, wizard's rule | Done, tested on the real printer, hot and cold. The late-reply resync, and failure and link-drop handling, have only run on the simulator |
 | `preheat`, `cool`, idle timeout | Done, tested on the real printer. Up to bed 80°C and nozzle 150°C, and the idle timeout only at low temperatures |
 | Last-resort plug cut | Built, simulator and fakes only |
@@ -26,7 +26,7 @@ The record of Tramline's design, firmware findings, test results and open issues
 | Mesh heights, `tramline mesh` | Built 2026-11-06: `M420 V1 T1`, read-only in the firmware's source, in the CLI and the GUI as text. `go test` and headless Chrome on the simulator only, installed 2026-11-06. **On the real printer 2026-11-06: the stored mesh after power-on, and a print's fresh mesh just after it ended. Mesh lines arrive during a card print too.** Read by itself after each print that probed a mesh, and drawn in the GUI as a coloured surface: built 2026-11-06, simulator only, not installed. See Built: mesh heights, and Built: mesh surface and the read after each print |
 | Probe view, the head live during a tram check and the mesh | Built 2026-11-05 for the GUI. Tram check: phase, target and step time in status, and the 3D view's probe points, moving head and reading pins. Mesh: each "Probing mesh point N/25." into the print job, and the 3D view's 5×5 grid filling in with the head at an estimated point, by UBL's order, which fits the real log's timing. `go test` and headless Chrome on the simulator only, not installed. On 2026-11-06 a card print showed the mesh lines arrive from the card too, and the user's video showed the real head following the assumed order. See Probe view |
 | Checksums in `files`, `status` and both web pages | Built 2026-11-21: the Pi's files read again when listed, checked before a stream and during a copy, the card's sum from the copy. `go test` and headless Chrome on the simulator only, not installed. See Checksums |
-| Packages: PKGBUILD for Arch, arm64 `.deb` for the Pi, installed by arch-config | Built 2026-11-21. The Arch package builds, not installed. The `.deb` 0.1.0 is released as `tramline-v0.1.0`, not yet installed on the Pi. See Packages |
+| Packages: PKGBUILD for Arch, arm64 `.deb` for the Pi, installed by arch-config | Built 2026-11-21. The Arch package builds, not installed. The `.deb` 0.1.0 is released as `tramline-v0.1.0` and installed on the Pi through arch-config, 2026-11-21. See Packages |
 | `tramline update` | Not started |
 
 ## Files

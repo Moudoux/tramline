@@ -43,7 +43,7 @@ install -Dm644 "$deb/tramline.service" "$root/usr/lib/systemd/system/tramline.se
 install -Dm644 "$deb/sysusers.conf" "$root/usr/lib/sysusers.d/tramline.conf"
 install -Dm644 "$deb/tmpfiles.conf" "$root/usr/lib/tmpfiles.d/tramline.conf"
 install -Dm644 "$deb/modules-load.conf" "$root/usr/lib/modules-load.d/tramline.conf"
-install -Dm644 deploy/config.json "$root/usr/share/tramline/config.json"
+install -Dm644 "$deb/config.json" "$root/usr/share/tramline/config.json"
 install -Dm644 README.md "$root/usr/share/doc/tramline/README.md"
 
 install -d "$root/DEBIAN"

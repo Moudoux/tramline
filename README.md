@@ -138,12 +138,11 @@ just build             # ./build.sh: check, test and build for Linux and macOS i
 just test              # ./build.sh test: check and test only
 just install           # build, then install this machine's client as tramline in ~/.local/bin
 just uninstall         # remove it again
-just deploy            # build, then deploy/install.sh raspberrypi: install on the Pi, which uses sudo there
 just deb               # build the Pi's package, dist/tramline_<version>_arm64.deb (needs dpkg-deb)
 just arch-pkg          # build the Arch package in packaging/arch/ (makepkg -si there installs it)
 ```
 
-The packages use the version in [VERSION](VERSION). The Pi's `.deb` installs the server, its unit (enabled), its user, its data folder and a default config, and arch-config installs it from this repository's releases. See Packages in the [install notes](notes/install-and-config.md).
+The packages use the version in [VERSION](VERSION). The Pi's `.deb` installs the server, its unit (enabled), its user, its data folder and a default config, and arch-config installs it from this repository's releases, which is how the Pi gets a new version. See Packages in the [install notes](notes/install-and-config.md).
 
 `just install` takes `TRAMLINE_BINDIR` for another folder, which has to be on your PATH.
 

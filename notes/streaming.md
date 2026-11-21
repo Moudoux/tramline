@@ -12,7 +12,7 @@ Part of the Tramline engineering notes, see the [index](README.md). Other sectio
 - **Finishing:** the marker's echo after `M400`. A stream doesn't get `Done printing file`, and may not get the print-done screen.
 - **Cancel:** stop sending, then urgent `M108` to end a heater wait and urgent `M410` to stop moves. Then queued `M104 S0`, `M140 S0`, `M107`, a relative lift of `Z5`, `M85 S0` and `M84`. There's no `G28XY`, so the head doesn't cross the part, and `M524` isn't used as it only acts on the card. `cool` remains a cancel, and `estop` is unchanged.
 - **Idle timer and stuck prints:** an answered line counts as moving on, with the same 30-minute limit.
-- **Restart or lost link:** unlike SD, the print can't carry on. The job ends as `failed`, with no resume. The next connection turns the heaters off, and otherwise `M85` and the existing timer and plug cut apply. Don't run `install.sh` during a stream.
+- **Restart or lost link:** unlike SD, the print can't carry on. The job ends as `failed`, with no resume. The next connection turns the heaters off, and otherwise `M85` and the existing timer and plug cut apply. Don't install a new `.deb` during a stream, as installing restarts the server.
 - **Logging, in the same build:** each `M27` wait, lines that arrive during a wait and are now thrown away, temperatures every minute or so, and in-flight bytes and timing at each resend.
 - **Unknowns to test:** what the LCD shows during a stream, whether its pause and stop work, whether `M85` behaves as read, and how long `ok` takes during real moves.
 

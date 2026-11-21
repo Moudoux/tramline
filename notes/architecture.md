@@ -35,7 +35,7 @@ Live status uses Server-Sent Events, which are plain HTTP. It's all in Go's stan
 
 ### Elevated commands on the Pi
 
-**Claude must never run `sudo` on the Pi.** Claude gives the user the exact command and the user runs it. That covers `deploy/install.sh`, editing `/etc/tramline/config.json`, and starting or restarting the service. Claude also asks before any other lasting change there.
+**Claude must never run `sudo` on the Pi.** Claude gives the user the exact command and the user runs it. That covers applying arch-config's `pi/` `tramline` task, which installs the `.deb`, editing `/etc/tramline/config.json`, and starting or restarting the service. Claude also asks before any other lasting change there.
 
 ### Secrets rule
 
@@ -44,5 +44,5 @@ Live status uses Server-Sent Events, which are plain HTTP. It's all in Go's stan
 - Nothing secret is ever displayed. Setup only shows public fingerprints, so they can be copied around or pasted into chat safely.
 - `tramline keygen` writes the private key and prints only its fingerprint.
 - The Hue key stays on the server. `hue pair` and the API never return it, and it's never logged.
-- `deploy/install.sh` doesn't create or read any secret.
+- The `.deb`'s install scripts don't create or read any secret.
 - Off limits, though nothing enforces this beyond the rule: `~/.config/tramline/client.key`, and in `/var/lib/tramline/` the files `tls.key` and `hue.key`. The rest of that folder is public or a fingerprint, but it's only readable through sudo anyway.
