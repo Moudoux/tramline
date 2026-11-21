@@ -1,0 +1,31 @@
+#!/bin/sh
+# After the files are in place: the user, its data folder, the default config if
+# there's none, the serial driver, then the service enabled and (re)started.
+set -eu
+
+[ "${1:-}" = configure ] || exit 0
+
+systemd-sysusers /usr/lib/sysusers.d/tramline.conf
+systemd-tmpfiles --create /usr/lib/tmpfiles.d/tramline.conf
+
+# The config is the admin's: it's only written when missing, and never replaced.
+if [ ! -e /etc/tramline/config.json ]; then
+	install -d -m 755 /etc/tramline
+	install -m 644 /usr/share/tramline/config.json /etc/tramline/config.json
+	echo "tramline: wrote /etc/tramline/config.json, edit it for this printer and plug"
+fi
+
+# Without systemd running (a chroot, an image build) the rest waits for boot.
+[ -d /run/systemd/system ] || exit 0
+
+modprobe ch341 || echo "tramline: couldn't load ch341, it loads at the next boot" >&2
+
+systemctl daemon-reload
+systemctl enable tramline.service
+
+if [ -e /var/lib/tramline/tls.crt ]; then
+	# Restarts an upgraded server, which ends a print streaming from the Pi.
+	systemctl restart tramline.service
+else
+	echo "tramline: enabled, not started: run 'sudo -u tramline tramline init --ip <address>', then 'sudo systemctl start tramline'"
+fi

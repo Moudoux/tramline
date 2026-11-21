@@ -2,11 +2,27 @@
 
 Part of the Tramline engineering notes, see the [index](README.md). Other sections are named in the text, as in "see Web page": the index says which file each is in.
 
+## Packages
+
+Built 2026-11-21, at the user's request: a PKGBUILD for the client on Arch, and an arm64 `.deb` for the server on the Pi, which arch-config installs. **Neither has been installed yet.** The version is in `VERSION` (0.1.0 to start), the PKGBUILD's `pkgver` must match it, and both packages build with it in place of a `dev-` time.
+
+- **Arch, `packaging/arch/PKGBUILD`:** the client binary in `/usr/bin/tramline`, and the README. It builds through `build.sh` in the pinned container, so it needs Docker rather than Go, and runs the tests too. `just arch-pkg` builds it, `makepkg -si` there installs it. Nothing for the server: no unit, user or data folder on the desktop. `~/.local/bin/tramline` from `just install` comes first on the PATH, so remove it with `just uninstall` once the package is installed.
+- **Pi, `packaging/build-deb.sh`, through `just deb`:** `dist/tramline_<version>_arm64.deb`, made with `dpkg-deb` (Arch's `dpkg` package, in arch-config's `dev` task). It checks the binary's version under `qemu-aarch64-static` before packaging. It holds:
+  - `/usr/bin/tramline`, and the unit in `/usr/lib/systemd/system/`, the same as `deploy/tramline.service` apart from that path.
+  - `sysusers.d`: the `tramline` user in `dialout`, kept as it is if it exists (uid 995 on the Pi).
+  - `tmpfiles.d`: `/var/lib/tramline`, mode 700.
+  - `modules-load.d`: `ch341` at boot, see the driver note below.
+  - `/usr/share/tramline/config.json`, copied to `/etc/tramline/config.json` only if there's none. It's not a conffile, so dpkg never asks about the edited one on the Pi.
+- **`postinst`** creates the user and folder, writes the config if missing, loads `ch341`, enables the service and restarts it. **Restarting ends a stream, so don't install during a print.** Before `tramline init` there's no `tls.crt`, so it enables the service without starting it, and says what to run.
+- **Removing** stops and disables the service. **Purging** also removes `/etc/tramline/config.json`, but keeps `/var/lib/tramline` and the user, as the server's identity, the Hue key and the history can't be made again.
+- **arch-config's `pi/` `tramline` task only installs the `.deb`:** it downloads it from the stringing-along release `tramline-v<version>`, pinned by sha256, and installs it with apt unless that version is installed. Once, it also disables the service and removes what the hand install left: `/etc/systemd/system/tramline.service`, which would override the package's unit, `/etc/modules-load.d/tramline.conf` and `/usr/local/bin/tramline`. So a new version is: change `VERSION` and `pkgver`, `just deb`, publish the release with the `.deb`, then put the version and sha256 in arch-config.
+- `deploy/install.sh` and `just deploy` are superseded, kept until the package has been installed on the Pi.
+
 ## Install and updates
 
 - The first install has to copy the binary over somehow. SSH is simplest, but it's only used for that step.
 - Installed once so far, on 2026-11-02, before the no-sudo rule. It's being kept. It created the `tramline` system user (uid 995, no login), plus the files below.
-- Today, updating means the user runs `deploy/install.sh` again.
+- Until the package is installed, updating means the user runs `deploy/install.sh` again. After that, it's a new `.deb` through arch-config, see Packages.
 - `tramline update` is still planned, to send a new binary over the authenticated connection and restart, refusing during a print or SD upload. **Its design is open:** the service runs unprivileged with a read-only `/usr/local/bin`, so it can't replace its own binary there. Keeping the binary under `/var/lib/tramline/` would solve that, at the cost of letting a compromised server rewrite itself.
 - Files: binary at `/usr/local/bin/tramline`, config in `/etc/tramline/config.json`, and everything the server generates in `/var/lib/tramline/`. Runs as a dedicated user in `dialout`.
 - **The serial driver must be loaded before the service starts.** The unit has `DevicePolicy=closed` and `DeviceAllow=char-ttyUSB rw`. systemd looks up the `ttyUSB` group in `/proc/devices` once, when the service starts, and that group only exists once `usbserial` is loaded. If the Pi boots with the printer unplugged, the server can't open the port until it restarts. That happened from 2026-11-12 to 11-19, during the cable test. Since 2026-11-19, `ch341` loads at boot from `/etc/modules-load.d/tramline.conf`, set in arch-config `pi/` (`task tramline`), which also manages the unit. The server now logs why it can't connect, such as `can't open the printer's port: ...` or `... didn't answer M115`, once each time the reason changes. Before that it was silent.

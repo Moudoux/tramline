@@ -4,6 +4,9 @@
 #
 #   ./build.sh          check, test, then build dist/tramline-linux-{arm64,amd64} and dist/tramline-darwin-arm64
 #   ./build.sh test     check and test only
+#
+# TRAMLINE_VERSION sets the version built in (default dev-<UTC time>), and
+# TRAMLINE_TARGETS limits the build to some of os/arch above, as the packages do.
 set -eu
 
 # Official image, pinned by digest. To upgrade Go, change both on purpose.
@@ -13,6 +16,7 @@ cd "$(dirname "$0")"
 mkdir -p dist .cache
 
 VERSION=${TRAMLINE_VERSION:-dev-$(date -u +%Y%m%d%H%M%S)}
+TARGETS=${TRAMLINE_TARGETS:-linux/arm64 linux/amd64 darwin/arm64}
 
 # Rootless Docker maps the container's root to this user, and any other user to
 # a subordinate ID that can't write the cache or dist/, so root is used there.
@@ -54,13 +58,15 @@ in_container "$IMAGE" sh -euc '
 
 [ "${1:-}" = test ] && exit 0
 
-in_container -e VERSION="$VERSION" "$IMAGE" sh -euc '
-	for target in linux/arm64 linux/amd64 darwin/arm64; do
+in_container -e VERSION="$VERSION" -e TARGETS="$TARGETS" "$IMAGE" sh -euc '
+	built=
+	for target in $TARGETS; do
 		os=${target%/*} arch=${target#*/}
 		GOOS=$os GOARCH=$arch go build -trimpath -buildvcs=false \
 			-ldflags "-s -w -X main.version=$VERSION" \
 			-o "dist/tramline-$os-$arch" .
+		built="$built tramline-$os-$arch"
 	done
 	cd dist
-	sha256sum tramline-linux-arm64 tramline-linux-amd64 tramline-darwin-arm64 | tee SHA256SUMS
+	sha256sum $built | tee SHA256SUMS
 '

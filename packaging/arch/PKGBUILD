@@ -1,0 +1,47 @@
+# Tramline's client for Arch, the same binary as the server. Build from this
+# directory with `makepkg -si`, or `just arch-pkg` from tramline/ to build only.
+#
+# It builds through ../../build.sh, in the pinned Go container like every other
+# Tramline build, so it needs Docker running rather than Go. The Pi's server is
+# packaged as a .deb instead, see ../build-deb.sh.
+#
+# This lives in packaging/arch/ because makepkg uses src/ and pkg/ next to the
+# PKGBUILD as its build area.
+
+pkgname=tramline
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Client for the Tramline print server (Ender 3 V2 on a Raspberry Pi)"
+arch=(x86_64 aarch64)
+url="https://github.com/Moudoux/stringing-along"
+license=(LicenseRef-none)
+makedepends=(docker)
+# A static Go binary, already stripped by the build's -ldflags "-s -w".
+options=(!strip !debug)
+
+_root="$startdir/../.."
+
+case "$CARCH" in
+x86_64) _goarch=amd64 ;;
+aarch64) _goarch=arm64 ;;
+esac
+
+prepare() {
+  local version
+  version=$(cat "$_root/VERSION")
+  if [ "$version" != "$pkgver" ]; then
+    echo "pkgver is $pkgver but tramline/VERSION is $version" >&2
+    return 1
+  fi
+}
+
+# build.sh runs the vet and tests first, so there's no separate check().
+build() {
+  cd "$_root"
+  TRAMLINE_VERSION=$pkgver TRAMLINE_TARGETS=linux/$_goarch ./build.sh
+}
+
+package() {
+  install -Dm755 "$_root/dist/tramline-linux-$_goarch" "$pkgdir/usr/bin/tramline"
+  install -Dm644 "$_root/README.md" "$pkgdir/usr/share/doc/tramline/README.md"
+}

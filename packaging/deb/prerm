@@ -1,0 +1,9 @@
+#!/bin/sh
+# On removal only: stop and disable the service. An upgrade leaves it running,
+# and postinst restarts it on the new binary.
+set -eu
+
+[ "${1:-}" = remove ] || exit 0
+[ -d /run/systemd/system ] || exit 0
+
+systemctl disable --now tramline.service || true

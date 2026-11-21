@@ -32,3 +32,12 @@ uninstall:
 # Install the server on the Pi over SSH, which uses sudo there
 deploy host="raspberrypi": build
     deploy/install.sh {{host}}
+
+# Build the Pi's server package, dist/tramline_<VERSION>_arm64.deb (needs dpkg-deb)
+deb:
+    TRAMLINE_VERSION=$(cat VERSION) TRAMLINE_TARGETS=linux/arm64 ./build.sh
+    packaging/build-deb.sh
+
+# Build this machine's Arch package in packaging/arch/, without installing it
+arch-pkg:
+    cd packaging/arch && makepkg -f

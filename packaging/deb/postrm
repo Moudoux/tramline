@@ -1,0 +1,17 @@
+#!/bin/sh
+# Purge removes the config postinst wrote. The data folder and the tramline user
+# stay: the folder holds the server's identity, the Hue key and the history,
+# which can't be made again, so deleting them is left to the admin.
+set -eu
+
+case "${1:-}" in
+remove)
+	[ -d /run/systemd/system ] && systemctl daemon-reload
+	;;
+purge)
+	rm -f /etc/tramline/config.json
+	rmdir /etc/tramline 2>/dev/null || true
+	echo "tramline: kept /var/lib/tramline and the tramline user"
+	;;
+esac
+exit 0
