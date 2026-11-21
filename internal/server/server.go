@@ -106,6 +106,7 @@ func (s *Server) baseCtx() context.Context {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", s.handleStatus)
+	mux.HandleFunc("GET /v1/events", s.handleEvents)
 	mux.HandleFunc("POST /v1/power", s.handlePower)
 	mux.HandleFunc("POST /v1/preheat", s.handlePreheat)
 	mux.HandleFunc("POST /v1/cool", s.handleCool)
@@ -144,23 +145,28 @@ func (s *Server) requireClient(next http.Handler) http.Handler {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.status(s.plugStatus(r.Context())))
+}
+
+// status is GET /v1/status with the plug given, which GET /v1/events leaves out.
+func (s *Server) status(plug *PlugStatus) StatusResponse {
 	offAt, problem := s.heatInfo()
 	// A running print keeps moving this on, so a time would only mislead.
 	if s.printJob().running() {
 		offAt = nil
 	}
-	writeJSON(w, http.StatusOK, StatusResponse{
+	return StatusResponse{
 		Version:      s.Version,
 		Simulated:    s.Simulated,
 		Printer:      s.Printer(),
-		Plug:         s.plugStatus(r.Context()),
+		Plug:         plug,
 		HeatersOffAt: offAt,
 		HeatProblem:  problem,
 		Tram:         s.tramJob(),
 		Copy:         s.copyJob(),
 		Print:        s.statusPrintJob(),
 		Scheduled:    s.pendingSchedules(),
-	})
+	}
 }
 
 func (s *Server) plugStatus(ctx context.Context) *PlugStatus {

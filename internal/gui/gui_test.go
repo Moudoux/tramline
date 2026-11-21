@@ -243,7 +243,7 @@ func TestForwardsOnlyTheListedRoutes(t *testing.T) {
 	before := len(r.pi.got())
 	for _, route := range []string{
 		"PUT /v1/files/a.gcode", "PUT /v1/update", "GET /v1/settings", "POST /v1/status",
-		"GET /v1/files/a.gcode/../../x", "DELETE /v1/schedule/3", "GET /v1/events", "POST /v1/hue/plugs",
+		"GET /v1/files/a.gcode/../../x", "DELETE /v1/schedule/3", "POST /v1/events", "POST /v1/hue/plugs",
 	} {
 		method, path, _ := strings.Cut(route, " ")
 		if w := r.request(method, path, strings.NewReader("x"), nil); w.Code == http.StatusOK {
@@ -274,11 +274,12 @@ func TestServesThePageAndPiStatus(t *testing.T) {
 	}
 	r.request(http.MethodGet, "/pi/status", nil, nil)
 	r.request(http.MethodGet, "/pi/model/7", nil, nil)
+	r.request(http.MethodGet, "/pi/events", nil, nil)
 	if w := r.request(http.MethodGet, "/pi/model/x", nil, nil); w.Code != http.StatusNotFound {
 		t.Errorf("bad model id: %d", w.Code)
 	}
 	got := strings.Join(r.pi.got(), ",")
-	if got != "GET /api/status,GET /api/model/7" {
+	if got != "GET /api/status,GET /api/model/7,GET /api/events" {
 		t.Errorf("page requests: %s", got)
 	}
 }

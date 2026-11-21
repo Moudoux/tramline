@@ -35,5 +35,6 @@ Port `8726` is proposed, which spells TRAM on a phone keypad. Not currently in u
 | `tramline hue pair` | `POST /v1/hue/pair` | Pair after the bridge's button is pressed |
 | `tramline hue plugs` | `GET /v1/hue/plugs` | List names and UUIDs, for filling in the config |
 | `tramline update <binary>` | `PUT /v1/update` | Replace the server binary |
+| none, the GUI | `GET /v1/events` | `GET /v1/status` without the plug, as server-sent events, within 200 ms of a change and at least once a second. The read-only page has `/api/events` the same way. Built 2026-11-21, simulator only, see Status streams under Web page |
 
 Long jobs return straight away with a job ID, and clients follow them through `status` or `watch`. An upload arrives at the Pi quickly over the network, so the slow serial copy carries on even if the client disconnects, and a failed copy can retry without re-sending the file.

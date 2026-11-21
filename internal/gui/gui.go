@@ -47,6 +47,7 @@ import (
 // else is forwarded, whatever the browser asks for.
 var APIRoutes = []string{
 	"GET /v1/status",
+	"GET /v1/events",
 	"POST /v1/power",
 	"POST /v1/preheat",
 	"POST /v1/cool",
@@ -94,7 +95,9 @@ type Server struct {
 	files   Files
 	pageURL *url.URL
 	page    *http.Client
-	mux     *http.ServeMux
+	// events is for the page's stream, which has no end, so no overall time limit.
+	events *http.Client
+	mux    *http.ServeMux
 	// tmpDir holds uploads while they're hashed and sent.
 	tmpDir string
 
@@ -151,6 +154,7 @@ func New(o Options) (*Server, error) {
 		files:   o.Files,
 		pageURL: page,
 		page:    &http.Client{Timeout: pageTimeout},
+		events:  &http.Client{Transport: eventsTransport()},
 		tmpDir:  o.TmpDir,
 		// Cookies don't keep to one port, so each run has its own name.
 		cookie:  "tramline_gui_" + strings.TrimPrefix(o.Addr, "127.0.0.1:"),
@@ -191,6 +195,7 @@ func New(o Options) (*Server, error) {
 	s.mux.Handle("GET /", http.FileServerFS(webui.GUI()))
 	s.mux.Handle("GET /shared/", http.StripPrefix("/shared", http.FileServerFS(webui.Shared())))
 	s.mux.HandleFunc("GET /pi/status", s.handlePageStatus)
+	s.mux.HandleFunc("GET /pi/events", s.handlePageEvents)
 	s.mux.HandleFunc("GET /pi/model/{id}", s.handlePageModel)
 	s.mux.HandleFunc("GET /gui/info", s.handleInfo)
 	s.mux.HandleFunc("POST /gui/upload", s.handleUpload)
@@ -298,6 +303,47 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 // ask for once a second, unlike /v1/status, which asks the Hue Bridge each time.
 func (s *Server) handlePageStatus(w http.ResponseWriter, r *http.Request) {
 	s.fromPage(w, r, "api/status")
+}
+
+func eventsTransport() http.RoundTripper {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = pageTimeout
+	return t
+}
+
+// handlePageEvents passes on the read-only page's status stream, each event as it comes.
+func (s *Server) handlePageEvents(w http.ResponseWriter, r *http.Request) {
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, s.pageURL.ResolveReference(&url.URL{Path: "api/events"}).String(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp, err := s.events.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "can't reach the Pi: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.WriteHeader(resp.StatusCode)
+	rc := http.NewResponseController(w)
+	buf := make([]byte, 32<<10)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return
+			}
+			if rc.Flush() != nil {
+				return
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func (s *Server) handlePageModel(w http.ResponseWriter, r *http.Request) {

@@ -172,3 +172,105 @@ function setFileLine(el, name, icon, key) {
   el.replaceChildren(document.createTextNode(name));
   if (icon) el.append(" ", icon);
 }
+
+// ---- Following the server's status ----
+
+// The server pushes its status as server-sent events, within a fraction of a second of
+// a change and at least once a second, so a stream that's quiet for a while has stalled.
+const STREAM_QUIET_MS = 5000;
+const STREAM_STALE_MS = 15000;
+const STREAM_RETRY_MS = 2000;
+
+// followStatus gives onStatus each status from the event stream at url. If the server
+// has no stream, as an older Tramline doesn't, it falls back to calling poll every
+// pollMs, which may be a function, or hiddenPollMs with the tab hidden. With no pollMs
+// it only polls once, to tell an older server from one out of reach, and leaves the
+// rest to the caller, who can see that from streaming. The stream is
+// closed while the tab is hidden. onLost is told, with the error if there is one, when
+// the server can't be reached, and done says when to give up for good.
+function followStatus(o) {
+  let source = null;
+  let streamed = false;
+  let polling = false;
+  let last = 0;
+  let timer = 0;
+  const done = o.done || (() => false);
+  const got = (st) => { last = Date.now(); o.onStatus(st); };
+
+  function open() {
+    if (done() || polling || source || document.hidden) return;
+    const es = new EventSource(o.url);
+    source = es;
+    last = Date.now();
+    es.addEventListener("status", (e) => {
+      let st;
+      try { st = JSON.parse(e.data); } catch { return; }
+      streamed = true;
+      got(st);
+    });
+    es.onerror = () => {
+      if (source !== es) return;
+      // Still open means the browser is reconnecting by itself.
+      if (es.readyState !== EventSource.CLOSED) { o.onLost(); return; }
+      close();
+      if (streamed) { o.onLost(); setTimeout(open, STREAM_RETRY_MS); return; }
+      // Refused before it ever sent anything: either the server is out of reach, or it
+      // has no stream. A poll tells which.
+      firstPoll();
+    };
+  }
+
+  function close() {
+    if (source) source.close();
+    source = null;
+  }
+
+  async function firstPoll() {
+    if (!o.poll) { o.onLost(); setTimeout(open, STREAM_RETRY_MS); return; }
+    try {
+      got(await o.poll());
+    } catch (err) {
+      o.onLost(err);
+      if (!done()) setTimeout(open, STREAM_RETRY_MS);
+      return;
+    }
+    polling = true;
+    if (o.pollMs) timer = setTimeout(pollOnce, interval());
+  }
+
+  const interval = () => {
+    if (document.hidden && o.hiddenPollMs) return o.hiddenPollMs;
+    return typeof o.pollMs === "function" ? o.pollMs() : o.pollMs;
+  };
+
+  async function pollOnce() {
+    clearTimeout(timer);
+    if (done()) return;
+    try { got(await o.poll()); } catch (err) { o.onLost(err); }
+    if (!done()) timer = setTimeout(pollOnce, interval());
+  }
+
+  setInterval(() => {
+    if (!source || done()) return;
+    const quiet = Date.now() - last;
+    if (quiet > STREAM_STALE_MS) { close(); open(); }
+    else if (quiet > STREAM_QUIET_MS) o.onLost();
+  }, 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) close();
+    else if (polling) { if (o.pollMs) pollOnce(); }
+    else open();
+  });
+  open();
+
+  return {
+    // streaming is false once it has fallen back to polling.
+    get streaming() { return !polling; },
+    // refresh asks again soon, for after an action. A stream needs nothing.
+    refresh() {
+      if (!polling || !o.pollMs) return;
+      clearTimeout(timer);
+      timer = setTimeout(pollOnce, 300);
+    },
+  };
+}

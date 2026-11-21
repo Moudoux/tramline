@@ -536,48 +536,65 @@ function meshSoon() {
   return Boolean(meshShown() || (job && job.state === "running" && job.pos < MESH_START_BYTES));
 }
 
-// ---- Polling ----
+// ---- Following the Pi ----
 
-async function pollPage() {
-  if (gone) return;
-  try {
-    page = await api("GET", "/pi/status");
-    if (view.ok) view.update(page.print);
-    showTramView();
-    showMeshView();
-    if (heightsShown && page.print && PRINT_BUSY.includes(page.print.state)) showHeights(null);
-    showNow();
-  } catch (err) {
-    if (!(err instanceof Gone)) {
-      $("badge").textContent = "can't reach the Pi";
-      $("badge").className = "badge bad";
-    }
-  }
-  setTimeout(pollPage, document.hidden ? PAGE_MS * 5 : PAGE_MS);
+// Both statuses come as event streams, pushed by the Pi as they change. The full one's
+// stream leaves out the plug, as reading it asks the Hue Bridge, so that's still asked
+// for every FULL_MS. Against an older Pi with no streams, both are polled as before.
+
+function gotPage(st) {
+  page = st;
+  if (view.ok) view.update(page.print);
+  showTramView();
+  showMeshView();
+  if (heightsShown && page.print && PRINT_BUSY.includes(page.print.state)) showHeights(null);
+  showNow();
 }
 
+function pageLost(err) {
+  if (err instanceof Gone || gone) return;
+  $("badge").textContent = "can't reach the Pi";
+  $("badge").className = "badge bad";
+}
+
+function gotFull(st) {
+  // A streamed status has no plug, so the last one read stays.
+  full = st.plug === undefined && full ? { ...st, plug: full.plug } : st;
+  showFull();
+}
+
+function fullLost(err) {
+  if (err instanceof Gone || gone || !err) return;
+  $("problem").textContent = err.message;
+  $("problem").hidden = false;
+}
+
+const fullBusy = () => tramming() || copying() || meshSoon() || (page && page.print && PREPARING.includes(page.print.state));
+
+let pageFollow = null;
+let fullFollow = null;
+
+// pollFull reads the full status with the plug, for its state. Without a stream it's
+// all there is, so it's asked for more often while something is going.
 async function pollFull() {
   clearTimeout(fullTimer);
   if (gone) return;
   if (!document.hidden) {
     try {
-      full = await api("GET", "/v1/status");
-      showFull();
+      gotFull(await api("GET", "/v1/status"));
     } catch (err) {
-      if (!(err instanceof Gone)) {
-        $("problem").textContent = err.message;
-        $("problem").hidden = false;
-      }
+      fullLost(err);
     }
   }
-  const busy = tramming() || copying() || meshSoon() || (page && page.print && PREPARING.includes(page.print.state));
-  fullTimer = setTimeout(pollFull, busy ? FULL_BUSY_MS : FULL_MS);
+  const streaming = fullFollow && fullFollow.streaming;
+  fullTimer = setTimeout(pollFull, !streaming && fullBusy() ? FULL_BUSY_MS : FULL_MS);
 }
 
-// refreshSoon catches up after an action, without waiting for the next poll.
+// refreshSoon catches up after an action. A stream brings most of it, but not the plug.
 function refreshSoon() {
   clearTimeout(fullTimer);
   fullTimer = setTimeout(pollFull, 300);
+  if (pageFollow) pageFollow.refresh();
   if (files) setTimeout(loadFiles, 300);
 }
 
@@ -1338,7 +1355,23 @@ async function fireEstop() {
     $("about-gui").textContent = info.version;
     $("about-address").textContent = info.server;
   } catch { /* shown by the polls */ }
-  pollPage();
+  pageFollow = followStatus({
+    url: "/pi/events",
+    poll: () => api("GET", "/pi/status"),
+    pollMs: PAGE_MS,
+    hiddenPollMs: PAGE_MS * 5,
+    onStatus: gotPage,
+    onLost: pageLost,
+    done: () => gone,
+  });
+  // Without a stream, pollFull does the polling, so this one has nothing to fall back to.
+  fullFollow = followStatus({
+    url: "/v1/events",
+    poll: () => api("GET", "/v1/status"),
+    onStatus: gotFull,
+    onLost: fullLost,
+    done: () => gone,
+  });
   pollFull();
   loadFiles();
 })();

@@ -2,7 +2,7 @@
 
 The record of Tramline's design, firmware findings, test results and open issues. For what it is and how to use it, see the [README](../README.md).
 
-**A read-only web page, `tramline web`, is installed on the Pi, see Web page. Status: running on the Pi with mutual TLS, paired with the real Hue Bridge, and `tramline power` works on the real plug. Stage 5, read-only printer status, has passed on the real printer. Stage 6, heating, has passed on the real printer, including the 30-minute idle timeout at low temperatures. `tramline tram` works on the real printer. Stage 7 has passed on the real printer. Stage 8, SD upload, has passed on the real printer, at 14 KB/s with a sliced file. Stage 9, `print`, `cancel` and `estop`, has passed on the real printer with a cold file and a small real print. Tram before every print is in use, with only its pass path run on the real printer. The first long print, 4 h 10 min, finished cleanly on 2026-11-04. Stage 10, printing by streaming, has passed on the real printer, including a 63-minute job that finished cleanly on 2026-11-04 with no resends, see Streaming design.** Last updated 2026-11-06.
+**A read-only web page, `tramline web`, is installed on the Pi, see Web page. Status: running on the Pi with mutual TLS, paired with the real Hue Bridge, and `tramline power` works on the real plug. Stage 5, read-only printer status, has passed on the real printer. Stage 6, heating, has passed on the real printer, including the 30-minute idle timeout at low temperatures. `tramline tram` works on the real printer. Stage 7 has passed on the real printer. Stage 8, SD upload, has passed on the real printer, at 14 KB/s with a sliced file. Stage 9, `print`, `cancel` and `estop`, has passed on the real printer with a cold file and a small real print. Tram before every print is in use, with only its pass path run on the real printer. The first long print, 4 h 10 min, finished cleanly on 2026-11-04. Stage 10, printing by streaming, has passed on the real printer, including a 63-minute job that finished cleanly on 2026-11-04 with no resends, see Streaming design.** Last updated 2026-11-21.
 
 | Part | State |
 |---|---|
@@ -25,6 +25,7 @@ The record of Tramline's design, firmware findings, test results and open issues
 | Desktop GUI, `tramline gui` | Built 2026-11-05, with everything the client's commands do and uploads from the browser. `go test` and headless Chrome on the simulator only, not yet used with the real Pi. See Desktop GUI |
 | Mesh heights, `tramline mesh` | Built 2026-11-06: `M420 V1 T1`, read-only in the firmware's source, in the CLI and the GUI as text. `go test` and headless Chrome on the simulator only, installed 2026-11-06. **On the real printer 2026-11-06: the stored mesh after power-on, and a print's fresh mesh just after it ended. Mesh lines arrive during a card print too.** Read by itself after each print that probed a mesh, and drawn in the GUI as a coloured surface: built 2026-11-06, simulator only, not installed. See Built: mesh heights, and Built: mesh surface and the read after each print |
 | Probe view, the head live during a tram check and the mesh | Built 2026-11-05 for the GUI. Tram check: phase, target and step time in status, and the 3D view's probe points, moving head and reading pins. Mesh: each "Probing mesh point N/25." into the print job, and the 3D view's 5×5 grid filling in with the head at an estimated point, by UBL's order, which fits the real log's timing. `go test` and headless Chrome on the simulator only, not installed. On 2026-11-06 a card print showed the mesh lines arrive from the card too, and the user's video showed the real head following the assumed order. See Probe view |
+| Status streams, server-sent events for both web pages | Built 2026-11-21: `/api/events` and `GET /v1/events` push status within 200 ms of a change, so the head, the tram check and the mesh move on about 5 times a second instead of every 1 to 2 seconds, with polling kept for an older Pi. `go test` and headless Chrome on the simulator only, not installed. See Status streams |
 | Checksums in `files`, `status` and both web pages | Built 2026-11-21: the Pi's files read again when listed, checked before a stream and during a copy, the card's sum from the copy. `go test` and headless Chrome on the simulator only, not installed. See Checksums |
 | Packages: PKGBUILD for Arch, arm64 `.deb` for the Pi, installed by arch-config | Built 2026-11-21. The Arch package 0.1.0-1 is installed on the desktop. The `.deb` 0.1.0 is released as `tramline-v0.1.0` and installed on the Pi through arch-config, 2026-11-21. See Packages |
 | `tramline update` | Not started |
@@ -42,7 +43,7 @@ Read [next-session.md](next-session.md) first. Paths in the notes, such as `inte
 | [security.md](security.md) | Mutual TLS, allow list, listening addresses, what it does not solve |
 | [install-and-config.md](install-and-config.md) | Install and updates, config, listening by interface (LAN and Tailscale) |
 | [api.md](api.md) | Every CLI command and its API endpoint |
-| [web-page.md](web-page.md) | tramline web, the 3D view, how it shares the port, trying it on the simulator |
+| [web-page.md](web-page.md) | tramline web, the 3D view, how it shares the port, trying it on the simulator, status streams |
 | [probe-view.md](probe-view.md) | Live view of the head during the tram check and the mesh probing (both built, simulator only): what the firmware reports, UBL's point order and its fit to the real log, the plan, what's built, and a warning about testing on the simulator |
 | [gui.md](gui.md) | tramline gui: the local web GUI with everything the CLI does, its sign-in, routes, page, tests and what isn't proven |
 | [printing.md](printing.md) | Print flow and print design, with firmware findings and results |
@@ -97,6 +98,7 @@ The text refers to sections by name, as in "see Stand print result". Sections ma
 | · · Not drawn | [web-page.md](web-page.md) |
 | · · No libraries | [web-page.md](web-page.md) |
 | · Trying it on the simulator | [web-page.md](web-page.md) |
+| · Status streams | [web-page.md](web-page.md) |
 | Probe view | [probe-view.md](probe-view.md) |
 | · What's known | [probe-view.md](probe-view.md) |
 | · Plan | [probe-view.md](probe-view.md) |

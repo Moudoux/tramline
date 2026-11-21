@@ -109,6 +109,7 @@ func (s *Server) WebHandler() http.Handler {
 	mux.Handle("GET /", http.FileServerFS(webui.Page()))
 	mux.Handle("GET /shared/", http.StripPrefix("/shared", http.FileServerFS(webui.Shared())))
 	mux.HandleFunc("GET /api/status", s.handleWebStatus)
+	mux.HandleFunc("GET /api/events", s.handleWebEvents)
 	mux.HandleFunc("GET /api/model/{id}", s.handleWebModel)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -121,6 +122,10 @@ func (s *Server) WebHandler() http.Handler {
 }
 
 func (s *Server) handleWebStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.webStatus())
+}
+
+func (s *Server) webStatus() WebStatus {
 	st := s.Printer()
 	out := WebStatus{
 		Version:   s.Version,
@@ -151,7 +156,7 @@ func (s *Server) handleWebStatus(w http.ResponseWriter, r *http.Request) {
 		out.Copy = &WebCopy{Name: job.Name, SHA256: job.SHA256, Bytes: job.Bytes, TotalBytes: job.TotalBytes}
 	}
 	out.Scheduled = s.webSchedules()
-	writeJSON(w, http.StatusOK, out)
+	return out
 }
 
 // webSchedules keeps the page short: all that are to come, and a few that have ended.

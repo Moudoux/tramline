@@ -1,6 +1,7 @@
 // Tramline's read-only page: the status, with the job drawn by the shared PrintView.
 "use strict";
 
+// Only used if the server has no event stream.
 const POLL_MS = 1000;
 const $ = (id) => document.getElementById(id);
 
@@ -114,21 +115,23 @@ function showStatus(st) {
   $("estimate").hidden = !printing(job);
 }
 
-async function poll() {
-  try {
-    const resp = await fetch("api/status", { cache: "no-store" });
-    if (!resp.ok) throw new Error(resp.statusText);
-    const st = await resp.json();
-    status = st;
-    if (view.ok) view.update(st.print);
-    showStatus(st);
-    showProgressDetails();
-  } catch (err) {
-    const badge = $("badge");
-    badge.textContent = "can't reach the server";
-    badge.className = "badge bad";
-  }
-  setTimeout(poll, POLL_MS);
+function gotStatus(st) {
+  status = st;
+  if (view.ok) view.update(st.print);
+  showStatus(st);
+  showProgressDetails();
+}
+
+function lost() {
+  const badge = $("badge");
+  badge.textContent = "can't reach the server";
+  badge.className = "badge bad";
+}
+
+async function pollStatus() {
+  const resp = await fetch("api/status", { cache: "no-store" });
+  if (!resp.ok) throw new Error(resp.statusText);
+  return resp.json();
 }
 
 function showProgressDetails() {
@@ -143,4 +146,4 @@ $("more").addEventListener("click", () => {
   $("more").setAttribute("aria-expanded", String(open));
 });
 
-poll();
+followStatus({ url: "api/events", poll: pollStatus, pollMs: POLL_MS, onStatus: gotStatus, onLost: lost });

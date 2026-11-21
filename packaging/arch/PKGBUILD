@@ -9,7 +9,7 @@
 # PKGBUILD as its build area.
 
 pkgname=tramline
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Client for the Tramline print server (Ender 3 V2 on a Raspberry Pi)"
 arch=(x86_64 aarch64)
