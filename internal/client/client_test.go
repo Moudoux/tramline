@@ -634,14 +634,35 @@ func simulatedUpload(t *testing.T, opts sim.Options) (*Client, *sim.Plug, *sim.C
 	opts.Card = sim.NewCard()
 	plug := &sim.Plug{Options: opts}
 	printer := marlin.NewPrinter(plug.Open)
+	data := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	// Registered after the folder, so it runs before the folder is removed: the server
+	// saves its state in the background as a print ends, such as just after an estop.
+	t.Cleanup(func() {
+		cancel()
+		waitForSaves(data)
+	})
 	go printer.Run(ctx)
 	f := serve(t, &server.Server{
-		Printer: printer.Status, Plug: plug, Heaters: printer, Prober: printer, Card: printer, Prints: printer, DataDir: t.TempDir(),
+		Printer: printer.Status, Plug: plug, Heaters: printer, Prober: printer, Card: printer, Prints: printer, DataDir: data,
 		HeatHold: time.Millisecond,
 	})
 	return f.client(t), plug, opts.Card
+}
+
+// waitForSaves waits, up to 2 seconds, until no save has been half done in the folder
+// for 50 ms. A save writes a ".tmp-" file and renames it.
+func waitForSaves(dir string) {
+	quiet := 0
+	for deadline := time.Now().Add(2 * time.Second); quiet < 5 && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		matches, _ := filepath.Glob(filepath.Join(dir, ".tmp-*"))
+		more, _ := filepath.Glob(filepath.Join(dir, "*", ".tmp-*"))
+		if len(matches)+len(more) == 0 {
+			quiet++
+		} else {
+			quiet = 0
+		}
+	}
 }
 
 func put(t *testing.T, c *Client, name, content string) server.FileRecord {
