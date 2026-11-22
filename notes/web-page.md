@@ -29,7 +29,7 @@ Built 2026-11-04, at the user's request. `tramline web` opens `http://192.168.1.
 This needs no Pi and no printer, and can run while the real server is printing, as it's all on this machine. After `./build.sh`:
 
 ```sh
-./sim-web.sh ../projects/claude-monitor-case/stand-retro-print_PETG.gcode
+./sim-web.sh ~/Applications/Solidcraft/projects/claude-monitor-case/stand-retro-print_PETG.gcode
 ```
 
 It starts a simulated printer on `127.0.0.1:18726`, uploads the file, starts a print and opens the page in your browser. Ctrl-C ends it.

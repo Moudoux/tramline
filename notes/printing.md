@@ -8,7 +8,7 @@ Part of the Tramline engineering notes, see the [index](README.md). Other sectio
 2. **Power on.** Skip if already on. Wait for the serial device and an `M115` reply.
 3. **Upload.** Skip if the same file is already on the card. This comes before heating, as the user agreed, because a large copy can outlast the 30-minute heater timer, which would stop it. In stream mode there's no copy.
 4. **Confirm.** Claude asks the user that the bed is clear, before `print`, as the head crosses the bed during the check.
-5. **Preheat.** Bed 80°C, nozzle 150°C, matching `../cura/start_gcode_PETG.txt` so PETG doesn't ooze. The wait at temperature before the first tram check is `tram_soak_seconds`, default 0, as the user's bed is a thin flexible plate made for PETG, not glass, decided 2026-11-03.
+5. **Preheat.** Bed 80°C, nozzle 150°C, matching `~/Applications/Solidcraft/cura/start_gcode_PETG.txt` so PETG doesn't ooze. The wait at temperature before the first tram check is `tram_soak_seconds`, default 0, as the user's bed is a thin flexible plate made for PETG, not glass, decided 2026-11-03.
 6. **Check tram,** in a loop until it passes. See Tram before printing.
 7. **Start.** In SD mode, `M23` then `M24`. The start G-code then homes, runs `G29 P1`, and heats the nozzle.
 8. **After the print.** Wait for the nozzle to drop below about 50°C, then cut power if requested.
@@ -35,7 +35,7 @@ Part of the Tramline engineering notes, see the [index](README.md). Other sectio
 **Also found in the existing files:**
 
 - An SD print runs whatever temperatures the file says, outside the server's limits. So `gcode.Measure` now refuses `M104` or `M109` above 260°C, and `M140` or `M190` above 100°C, at upload.
-- CuraEngine CLI files had an unresolved `G1 X0 Y{machine_depth}` in their end G-code. It's expected to have moved X only, so the print wasn't presented, but that's from memory of the parser, which hasn't been read. `../cura/resolve_settings.py` now writes Y220, as the setting's own value of 235 is past this printer's Y limit of 231.
+- CuraEngine CLI files had an unresolved `G1 X0 Y{machine_depth}` in their end G-code. It's expected to have moved X only, so the print wasn't presented, but that's from memory of the parser, which hasn't been read. `~/Applications/Solidcraft/cura/resolve_settings.py` now writes Y220, as the setting's own value of 235 is past this printer's Y limit of 231.
 
 **Design:**
 

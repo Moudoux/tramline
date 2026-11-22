@@ -1,5 +1,5 @@
 # Tramline's client for Arch, the same binary as the server. Build from this
-# directory with `makepkg -si`, or `just arch-pkg` from tramline/ to build only.
+# directory with `makepkg -si`, or `just arch-pkg` from the repo root to build only.
 #
 # It builds through ../../build.sh, in the pinned Go container like every other
 # Tramline build, so it needs Docker running rather than Go. The Pi's server is
@@ -13,7 +13,7 @@ pkgver=0.1.1
 pkgrel=1
 pkgdesc="Client for the Tramline print server (Ender 3 V2 on a Raspberry Pi)"
 arch=(x86_64 aarch64)
-url="https://github.com/Moudoux/stringing-along"
+url="https://github.com/Moudoux/tramline"
 license=(LicenseRef-none)
 makedepends=(docker)
 # A static Go binary, already stripped by the build's -ldflags "-s -w".
@@ -30,7 +30,7 @@ prepare() {
   local version
   version=$(cat "$_root/VERSION")
   if [ "$version" != "$pkgver" ]; then
-    echo "pkgver is $pkgver but tramline/VERSION is $version" >&2
+    echo "pkgver is $pkgver but VERSION is $version" >&2
     return 1
   fi
 }

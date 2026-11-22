@@ -19,5 +19,5 @@ Log real drift first, then try one motor on one corner if it's justified. Solid 
 
 ## Related files
 
-- `../cura/`: slicing scripts, PETG profile and start G-code
-- `../cura/start_gcode_PETG.txt`: the start sequence referred to above, which keeps `G29 P1`, `G29 A` and `C108`
+- `~/Applications/Solidcraft/cura/`: slicing scripts, PETG profile and start G-code
+- `~/Applications/Solidcraft/cura/start_gcode_PETG.txt`: the start sequence referred to above, which keeps `G29 P1`, `G29 A` and `C108`

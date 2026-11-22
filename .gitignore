@@ -1,0 +1,24 @@
+# Build output, build cache and printer test logs
+/dist/
+/.cache/
+/test-logs/
+
+# Private notes: device IDs and incident logs kept off GitHub
+/notes/private/
+
+# The Arch package's build area
+/packaging/arch/src/
+/packaging/arch/pkg/
+/packaging/arch/*.pkg.tar.*
+
+# Secrets, in case one ever lands here
+*.key
+*.pem
+.env
+.env.*
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# macOS
+.DS_Store

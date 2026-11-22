@@ -146,7 +146,56 @@ The packages use the version in [VERSION](VERSION). The Pi's `.deb` installs the
 
 `just install` takes `TRAMLINE_BINDIR` for another folder, which has to be on your PATH.
 
-Setting up a new computer as a client is covered in the [main README](../README.md#tramline-for-printing).
+## Download
+
+Prebuilt binaries are on the [latest release](https://github.com/Moudoux/tramline/releases/latest). The Pi runs the server from the same program that other computers use as the client:
+
+- [Linux arm64](https://github.com/Moudoux/tramline/releases/latest/download/tramline-linux-arm64), for the Raspberry Pi
+- [Linux x86_64](https://github.com/Moudoux/tramline/releases/latest/download/tramline-linux-amd64)
+- [macOS arm64](https://github.com/Moudoux/tramline/releases/latest/download/tramline-darwin-arm64)
+- [SHA256SUMS](https://github.com/Moudoux/tramline/releases/latest/download/SHA256SUMS)
+- `tramline_<version>_arm64.deb`, the Pi's server package
+
+Check the download and make it executable before installing it as `tramline` on your PATH, for example on a Mac:
+
+```sh
+shasum -a 256 -c --ignore-missing SHA256SUMS
+chmod +x tramline-darwin-arm64
+mv tramline-darwin-arm64 ~/.local/bin/tramline
+```
+
+On Linux, use `sha256sum` instead of `shasum -a 256`. The binaries aren't signed, so on a Mac, a copy downloaded in a browser also needs `xattr -d com.apple.quarantine ~/.local/bin/tramline` before it will run.
+
+## Setting up a client
+
+The server is already on the Pi, so a new computer only needs a client. It must be on the same network as the Pi, or on its tailnet.
+
+1. Install `tramline`: download it as above, build it with `just install` (Docker and [just](https://github.com/casey/just), no Go), or on Arch build the package in `packaging/arch/`. `~/.local/bin` has to be on your PATH. Ubuntu and Fedora add it by default, but macOS and Arch don't, so add `export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc` or `~/.bashrc` there.
+2. Create this computer's key, in `~/.config/tramline/` on Linux and macOS alike. It stays on this computer, and the command prints only the public fingerprint:
+
+   ```sh
+   tramline keygen
+   ```
+
+3. On the Pi, get the server's fingerprint and allow the new client:
+
+   ```sh
+   sudo -u tramline tramline fingerprint
+   sudo -u tramline tramline allow <client-fingerprint> --name <computer-name>
+   ```
+
+4. Back on the new computer, log in and check it works:
+
+   ```sh
+   tramline login https://raspberrypi:8726 <server-fingerprint>
+   tramline status
+   ```
+
+5. Add an SSH host called `raspberrypi` to `~/.ssh/config`, using user `pi`. Saving logs uses it. The client itself doesn't need SSH.
+
+## Setting up a new Pi
+
+This is only needed if the Pi itself is replaced. See Security, Install and updates, Config and the test plan in the [engineering notes](notes/README.md). In short: install the `.deb` from a release with `sudo apt install ./tramline_<version>_arm64.deb`, then `sudo -u tramline tramline init --ip <address>`, `sudo systemctl start tramline` and `tramline hue pair` on the Pi, then fill in `/etc/tramline/config.json` with the plug's UUID from `tramline hue plugs`. The printer needs the USB cable with its +5V wire cut, see The USB cable in the notes.
 
 ## Trying it without a printer
 

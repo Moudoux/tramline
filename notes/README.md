@@ -32,7 +32,7 @@ The record of Tramline's design, firmware findings, test results and open issues
 
 ## Files
 
-Read [next-session.md](next-session.md) first. Paths in the notes, such as `internal/server/web.go`, `test-logs/` or `../cura/`, are relative to the `tramline/` folder, not this one. Read the others only for the topic in hand.
+Read [next-session.md](next-session.md) first. Paths in the notes, such as `internal/server/web.go` or `test-logs/`, are relative to the repo root, not this folder. `~/Applications/Solidcraft/` is the private stringing-along workspace, with the Cura profile, the designs and the Claude Code skills. Tramline lived in its `tramline/` folder until 2026-11-22, so older notes and `just tramline/<recipe>` commands refer to it there. Read the others only for the topic in hand.
 
 | File | What is in it |
 |---|---|

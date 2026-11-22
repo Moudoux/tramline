@@ -9,7 +9,7 @@ Part of the Tramline engineering notes, see the [index](README.md). Other sectio
 3. Check bed tram, and pause for manual adjustment if needed.
 4. Upload a print and start it.
 
-This is a lightweight alternative to OctoPrint, which the user finds heavy. The full workflow becomes SolidCraft design, then slicing in `../cura/`, then Tramline.
+This is a lightweight alternative to OctoPrint, which the user finds heavy. The full workflow becomes SolidCraft design, then slicing in `~/Applications/Solidcraft/cura/`, then Tramline.
 
 ## Hardware
 

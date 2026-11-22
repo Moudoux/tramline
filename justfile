@@ -1,4 +1,4 @@
-# Tramline tasks. Run `just` in this folder, or `just tramline/<recipe>` from
+# Tramline tasks. Run `just` in this folder to list them, or `just <recipe>`
 # the repository root, to list or run them.
 
 bindir := env("TRAMLINE_BINDIR", home_directory() / ".local/bin")

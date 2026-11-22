@@ -61,7 +61,7 @@ Installed-Size: $size
 Depends: systemd, kmod
 Section: misc
 Priority: optional
-Homepage: https://github.com/Moudoux/stringing-along
+Homepage: https://github.com/Moudoux/tramline
 Description: Print server for an Ender 3 V2 on a Raspberry Pi
  Switches the printer through a Hue plug, checks the bed's tram, uploads
  and prints G-code over USB, and serves a read-only status page.
