@@ -68,6 +68,9 @@ var APIRoutes = []string{
 	"POST /v1/schedule/{id}/cancel",
 	"POST /v1/hue/pair",
 	"GET /v1/hue/plugs",
+	"GET /v1/notify",
+	"PUT /v1/notify",
+	"POST /v1/notify/test",
 }
 
 const (

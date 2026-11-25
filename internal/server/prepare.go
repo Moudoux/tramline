@@ -384,6 +384,7 @@ func (s *Server) toAdjusting(ctx context.Context, id int, result *tram.Result, p
 	// A cancel from here on ends the job by itself.
 	s.print.leg = 0
 	s.savePrintJob()
+	s.notifyAdjusting(job, result, note)
 	s.print.mu.Unlock()
 	if result != nil {
 		log.Printf("print %d: waiting for the user to %s %s, range %.3f mm", id, result.Action, result.Corner, result.Range)

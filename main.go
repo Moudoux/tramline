@@ -26,6 +26,7 @@ import (
 	"tramline/internal/config"
 	"tramline/internal/hue"
 	"tramline/internal/marlin"
+	"tramline/internal/notify"
 	"tramline/internal/secure"
 	"tramline/internal/serial"
 	"tramline/internal/server"
@@ -90,6 +91,14 @@ Client:
   tramline schedule cancel <id>                  cancel one that hasn't started printing
   tramline hue pair                             pair the server with the Hue Bridge
   tramline hue plugs                             list names and UUIDs on the bridge
+  tramline notify [--json]                       show the notifications the Pi sends to Switchboard
+  tramline notify set [--url <url>] [--link <url>] [--events <list>|all|none]
+                                                 set Switchboard's address, a link to put in each
+                                                 notification, and which events send
+  tramline notify token [--clear]                save Switchboard's token on the Pi, read from
+                                                 stdin, or asked for without showing it
+  tramline notify on|off                         start or stop sending
+  tramline notify test                           send a test notification now, even when off
 
   tramline version
 `
@@ -149,6 +158,8 @@ func main() {
 		err = runSchedule(args)
 	case "hue":
 		err = runHue(args)
+	case "notify":
+		err = runNotify(args)
 	case "version":
 		fmt.Println(version)
 	default:
@@ -349,6 +360,7 @@ func runServe(args []string) error {
 		TramSoak:  time.Duration(cfg.TramSoakSeconds) * time.Second,
 		DataDir:   cfg.DataDir,
 		Allowed:   func(fp string) bool { return secure.Allowed(cfg.DataDir, fp) },
+		Notify:    notify.New(cfg.DataDir),
 	}
 	// A simulated printer must never switch the real plug.
 	if *useSim {

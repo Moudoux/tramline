@@ -761,6 +761,7 @@ func (s *Server) closeJobPower(state, why string, autoOff bool) {
 	}
 	s.savePrintJob()
 	log.Printf("print %d: %s. %s", job.ID, state, why)
+	s.notifyJobEnd(job)
 	s.wakeWatcher()
 	if job.ScheduleID != 0 {
 		s.applyJobEnd(job)

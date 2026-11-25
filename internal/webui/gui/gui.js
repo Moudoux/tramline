@@ -620,6 +620,7 @@ for (const tab of document.querySelectorAll(".tabs button")) {
     panes.scrollTop = tabScroll[name] || 0;
     if (name === "files") loadFiles();
     if (name === "schedule") loadSchedules();
+    if (name === "more") loadNotify();
   });
 }
 
@@ -1199,6 +1200,97 @@ $("hue-plugs").addEventListener("click", async (e) => {
     li.append(main);
     return li;
   }));
+});
+
+// ---- Notifications ----
+
+// The settings are only read when the tab opens and after a change, so a reload never
+// throws away what's being typed. The token is never sent back by the Pi.
+function showNotify(v) {
+  let state = "Off.";
+  if (v.ready) state = "On: the Pi sends a notification for each event ticked below.";
+  else if (v.enabled) state = "On, but they need an address and a token to send.";
+  else if (!v.url || !v.token_set) state = "Off. Enter Switchboard's address and a token, save and test, then tick Send notifications.";
+  $("notify-state").textContent = state;
+  $("notify-problem").textContent = v.problem ? sentence(v.problem) : "";
+  $("notify-problem").hidden = !v.problem;
+  $("notify-enabled").checked = v.enabled;
+  $("notify-url").value = v.url || "";
+  $("notify-link").value = v.link || "";
+  $("notify-token").value = "";
+  $("notify-token").placeholder = v.token_set ? "Saved on the Pi. Type a new one to replace it" : "sb_…";
+  $("notify-forget").hidden = !v.token_set;
+
+  const on = new Set(v.events || []);
+  const box = $("notify-events");
+  box.replaceChildren(el("legend", "", "Send for"), ...(v.available || []).map((e) => {
+    const label = el("label");
+    const input = el("input");
+    input.type = "checkbox";
+    input.value = e.name;
+    input.checked = on.has(e.name);
+    const text = el("span");
+    text.append(el("strong", "", e.label), el("small", "", e.description));
+    label.append(input, text);
+    return label;
+  }));
+
+  const last = v.last;
+  $("notify-last").hidden = !last;
+  if (last) {
+    let text = `Last: ${shortTime(last.at)}, “${last.title}”, ${last.ok ? "sent" : "not sent: " + last.error}`;
+    if (last.dropped) text += `. ${last.dropped} dropped, as too many were waiting`;
+    $("notify-last").textContent = sentence(text);
+  }
+}
+
+async function loadNotify() {
+  try {
+    showNotify(await api("GET", "/v1/notify"));
+  } catch (err) {
+    if (!(err instanceof Gone)) $("notify-state").textContent = sentence(err.message);
+  }
+}
+
+function notifyForm() {
+  const body = {
+    enabled: $("notify-enabled").checked,
+    url: $("notify-url").value.trim(),
+    link: $("notify-link").value.trim(),
+    events: [...$("notify-events").querySelectorAll("input:checked")].map((i) => i.value),
+  };
+  const token = $("notify-token").value.trim();
+  if (token) body.token = token;
+  return body;
+}
+
+$("notify-save").addEventListener("click", async (e) => {
+  const v = await act(e.currentTarget, () => api("PUT", "/v1/notify", notifyForm()), "Saved on the Pi.");
+  if (v && v !== true) showNotify(v);
+});
+
+// The test saves the form first, so what's typed is what's tried.
+$("notify-test").addEventListener("click", async (e) => {
+  let saved = false;
+  await act(e.currentTarget, async () => {
+    showNotify(await api("PUT", "/v1/notify", notifyForm()));
+    saved = true;
+    return api("POST", "/v1/notify/test");
+  }, "Saved, and the test was sent. Switchboard's page shows where it went.");
+  // Shows how the test went. A failed save leaves the form as typed, to correct.
+  if (saved) loadNotify();
+});
+
+$("notify-forget").addEventListener("click", async (e) => {
+  const sure = await ask({
+    title: "Remove the token?",
+    text: "The Pi forgets Switchboard's token, and stops sending notifications until a new one is saved.",
+    yes: "Remove",
+    danger: true,
+  });
+  if (!sure) return;
+  const v = await act(e.currentTarget, () => api("PUT", "/v1/notify", { token: "" }), "The token is removed from the Pi.");
+  if (v && v !== true) showNotify(v);
 });
 
 $("tram-info").addEventListener("click", async (e) => {

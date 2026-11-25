@@ -95,6 +95,7 @@ func (s *Server) setProblem(problem string) {
 	defer s.heat.mu.Unlock()
 	if problem != "" && problem != s.heat.problem {
 		log.Print(problem)
+		s.notifyProblem("Printer problem", problem)
 	}
 	s.heat.problem = problem
 }

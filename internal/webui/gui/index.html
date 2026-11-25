@@ -134,6 +134,24 @@
       </div>
 
       <div class="block">
+        <h2>Notifications</h2>
+        <p class="hint">The Pi sends them to a Switchboard server, which passes them on to wherever it's set up to. The token is kept on the Pi and never shown again.</p>
+        <p id="notify-state" class="hint">Loading…</p>
+        <p id="notify-problem" class="problem" hidden></p>
+        <label class="toggle"><input id="notify-enabled" type="checkbox"><span>Send notifications</span></label>
+        <label class="field"><span>Switchboard address</span><input id="notify-url" type="url" placeholder="https://notify.example.lan" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>Token</span><input id="notify-token" type="password" autocomplete="off" spellcheck="false" placeholder="sb_…"></label>
+        <label class="field"><span>Link in each notification, optional</span><input id="notify-link" type="url" placeholder="http://raspberrypi:8726/" autocomplete="off" spellcheck="false"></label>
+        <fieldset id="notify-events" class="checks"><legend>Send for</legend></fieldset>
+        <div class="row buttons">
+          <button id="notify-save" type="button" class="btn primary">Save</button>
+          <button id="notify-test" type="button" class="btn">Save and test</button>
+          <button id="notify-forget" type="button" class="btn danger" hidden>Remove the token</button>
+        </div>
+        <p id="notify-last" class="hint" hidden></p>
+      </div>
+
+      <div class="block">
         <h2>Probing settings</h2>
         <p class="hint">Asks the firmware about probing and the mesh. Nothing moves.</p>
         <div class="row buttons">

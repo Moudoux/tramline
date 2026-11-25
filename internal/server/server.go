@@ -14,6 +14,7 @@ import (
 
 	"tramline/internal/hue"
 	"tramline/internal/marlin"
+	"tramline/internal/notify"
 	"tramline/internal/secure"
 )
 
@@ -83,6 +84,9 @@ type Server struct {
 	DataDir string
 	// Now is the clock, replaced in tests.
 	Now func() time.Time
+	// Notify sends notifications to Switchboard. Nil means there's nowhere to keep its
+	// settings, so there are none.
+	Notify *notify.Notifier
 
 	heat   heatState
 	tram   tramState
@@ -128,6 +132,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/schedule/{id}/cancel", s.handleScheduleCancel)
 	mux.HandleFunc("POST /v1/hue/pair", s.handleHuePair)
 	mux.HandleFunc("GET /v1/hue/plugs", s.handleHuePlugs)
+	mux.HandleFunc("GET /v1/notify", s.handleNotifyGet)
+	mux.HandleFunc("PUT /v1/notify", s.handleNotifyPut)
+	mux.HandleFunc("POST /v1/notify/test", s.handleNotifyTest)
 	return s.requireClient(mux)
 }
 
@@ -333,6 +340,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener, tlsCfg *tls.Config)
 	}
 	if s.Prints != nil {
 		go s.watchSchedules(ctx)
+	}
+	if s.Notify != nil {
+		go s.Notify.Run(ctx)
 	}
 	tlsConns, plainConns := splitListener(ln)
 	defer ln.Close()

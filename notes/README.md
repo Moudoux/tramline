@@ -2,7 +2,7 @@
 
 The record of Tramline's design, firmware findings, test results and open issues. For what it is and how to use it, see the [README](../README.md).
 
-**A read-only web page, `tramline web`, is installed on the Pi, see Web page. Status: running on the Pi with mutual TLS, paired with the real Hue Bridge, and `tramline power` works on the real plug. Stage 5, read-only printer status, has passed on the real printer. Stage 6, heating, has passed on the real printer, including the 30-minute idle timeout at low temperatures. `tramline tram` works on the real printer. Stage 7 has passed on the real printer. Stage 8, SD upload, has passed on the real printer, at 14 KB/s with a sliced file. Stage 9, `print`, `cancel` and `estop`, has passed on the real printer with a cold file and a small real print. Tram before every print is in use, with only its pass path run on the real printer. The first long print, 4 h 10 min, finished cleanly on 2026-11-04. Stage 10, printing by streaming, has passed on the real printer, including a 63-minute job that finished cleanly on 2026-11-04 with no resends, see Streaming design.** Last updated 2026-11-21.
+**A read-only web page, `tramline web`, is installed on the Pi, see Web page. Status: running on the Pi with mutual TLS, paired with the real Hue Bridge, and `tramline power` works on the real plug. Stage 5, read-only printer status, has passed on the real printer. Stage 6, heating, has passed on the real printer, including the 30-minute idle timeout at low temperatures. `tramline tram` works on the real printer. Stage 7 has passed on the real printer. Stage 8, SD upload, has passed on the real printer, at 14 KB/s with a sliced file. Stage 9, `print`, `cancel` and `estop`, has passed on the real printer with a cold file and a small real print. Tram before every print is in use, with only its pass path run on the real printer. The first long print, 4 h 10 min, finished cleanly on 2026-11-04. Stage 10, printing by streaming, has passed on the real printer, including a 63-minute job that finished cleanly on 2026-11-04 with no resends, see Streaming design.** Last updated 2026-11-25.
 
 | Part | State |
 |---|---|
@@ -28,6 +28,7 @@ The record of Tramline's design, firmware findings, test results and open issues
 | Status streams, server-sent events for both web pages | Built 2026-11-21: `/api/events` and `GET /v1/events` push status within 200 ms of a change, so the head, the tram check and the mesh move on about 5 times a second instead of every 1 to 2 seconds, with polling kept for an older Pi. `go test` and headless Chrome on the simulator only, not installed. See Status streams |
 | Checksums in `files`, `status` and both web pages | Built 2026-11-21: the Pi's files read again when listed, checked before a stream and during a copy, the card's sum from the copy. `go test` and headless Chrome on the simulator only, not installed. See Checksums |
 | Packages: PKGBUILD for Arch, arm64 `.deb` for the Pi, installed by arch-config | Built 2026-11-21. The Arch package 0.1.0-1 is installed on the desktop. The `.deb` 0.1.0 is released as `tramline-v0.1.0` and installed on the Pi through arch-config, 2026-11-21. See Packages |
+| Notifications to Switchboard, `tramline notify`, the GUI's settings | Built 2026-11-25: print finished, failed or cancelled, a tram check waiting for the knobs, a scheduled print that didn't start, heater and power problems, each on or off, the token kept on the Pi. `go test`, headless Chrome and the CLI on the simulator with a fake Switchboard only, not installed. See Notifications |
 | `tramline update` | Not started |
 
 ## Files
@@ -55,6 +56,7 @@ Read [next-session.md](next-session.md) first. Paths in the notes, such as `inte
 | [hue-plug.md](hue-plug.md) | Pairing, plug UUID, power control |
 | [safety-and-heating.md](safety-and-heating.md) | Server-enforced safety rules, preheat, cool, idle timeout |
 | [testing-and-questions.md](testing-and-questions.md) | Test plan, open questions, to do outside the code |
+| [notifications.md](notifications.md) | Notifications to Switchboard: design, where the token is kept, the events and what each says, tests |
 | [ideas-and-related.md](ideas-and-related.md) | Motorised knobs, later ideas, related files |
 
 ## Where each section is
@@ -181,6 +183,10 @@ The text refers to sections by name, as in "see Stand print result". Sections ma
 | Test plan | [testing-and-questions.md](testing-and-questions.md) |
 | Open questions | [testing-and-questions.md](testing-and-questions.md) |
 | To do outside the code | [testing-and-questions.md](testing-and-questions.md) |
+| Notifications | [notifications.md](notifications.md) |
+| · Design | [notifications.md](notifications.md) |
+| · Events | [notifications.md](notifications.md) |
+| · To set it up on the Pi | [notifications.md](notifications.md) |
 | Ideas parked | [ideas-and-related.md](ideas-and-related.md) |
 | · · Other later ideas | [ideas-and-related.md](ideas-and-related.md) |
 | Related files | [ideas-and-related.md](ideas-and-related.md) |

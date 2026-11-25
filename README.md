@@ -15,6 +15,7 @@ The name joins bed **tram**ming with the serial **line** to the printer.
 - **Printing two ways:** streams the file from the Pi line by line, or prints from the SD card, which carries on if the Pi goes down.
 - **Scheduling:** checks tram now, powers off, then at the set time powers on, checks again and prints unattended. It cancels itself if the check fails or another print has started since.
 - **Stopping:** cancels a print with the heaters off, or an emergency stop with `M112` and the plug cut.
+- **Notifications:** the Pi sends them to a [Switchboard](notes/notifications.md) server when a print finishes, fails or is cancelled, when a tram check needs the knobs turned, when a scheduled print doesn't start, and when the heaters or power have a problem. Each event can be switched on or off, from `tramline notify` or the GUI, and the token stays on the Pi.
 - **Status:** power, temperatures, the current job, progress and how recent scheduled prints ended, also as JSON.
 - **Desktop GUI:** `tramline gui` does everything the commands do in a browser on your computer, with drag-and-drop uploads, a 3D print view, a live tram check and the mesh as a coloured surface.
 - **Web page:** a read-only status page with a 3D view of the print, served by the Pi to any browser or phone, with no login.
@@ -107,17 +108,34 @@ Keep the bed clear until it prints. If any print has started since you scheduled
 | `estop` | Emergency stop: `M112`, then cut the plug |
 | `schedule <file> --from pi\|sd --at "YYYY-MM-DD HH:MM" --bed-clear` | Check tram now, power off, then print at that time if tram still passes |
 | `schedule list [--json]`, `schedule cancel <id>` | List scheduled prints and how recent ones ended, or cancel one that hasn't started printing |
+| `notify`, `notify set [--url <url>] [--link <url>] [--events <list>]` | Show or change the notifications the Pi sends to Switchboard, see below |
+| `notify token [--clear]`, `notify on\|off`, `notify test` | Save Switchboard's token on the Pi, read from stdin and never shown, start or stop sending, or send a test |
 
 Run `tramline help` for everything, including the options and the commands used on the Pi.
 
 ## GUI
 
-`tramline gui` opens a browser with everything the commands above do: files, with uploads by dragging them onto the window, printing and scheduling, cancelling, copying to the card, the plug, preheat and cool, tram checks, the Hue plug and an emergency stop. The print is drawn in 3D, as on the web page.
+`tramline gui` opens a browser with everything the commands above do: files, with uploads by dragging them onto the window, printing and scheduling, cancelling, copying to the card, the plug, preheat and cool, tram checks, the Hue plug, notifications and an emergency stop. The print is drawn in 3D, as on the web page.
 
 - **It runs on your computer, not the Pi,** on `127.0.0.1` only, and talks to the Pi with this computer's key, the same way the commands do. The browser never gets the key. Ctrl-C stops it, and anything already sent to the Pi carries on.
 - **It signs the browser in once,** with a link that only works one time. To open it in another browser or after closing it, run `tramline gui` again.
 - **The Pi still decides:** printing, scheduling and tram checks need the "bed is clear" box ticked each time, and the Pi's own rules apply as they do to the commands.
 - **The emergency stop is held** for just over half a second, so a stray click can't set it off.
+
+## Notifications
+
+The Pi can send a notification to a Switchboard server, which passes it on to wherever that's set up to send them: Discord, a phone and so on. To set it up, get Switchboard's address and a token for a source, then:
+
+```sh
+tramline notify set --url https://notify.example.lan
+tramline notify token          # asks for the token without showing it, or reads it from stdin
+tramline notify test           # sends one now, even while they're off
+tramline notify on
+```
+
+`tramline notify` shows the settings, which events send, and how the last send went. The GUI's More tab does the same. The events are `print_finished`, `print_failed`, `print_cancelled`, `needs_adjusting`, `schedule_ended` and `problem`, all on by default. Choose them with `notify set --events print_finished,problem`, or `all`. `--link` adds a link to each notification, such as the web page's address.
+
+The token is kept on the Pi, readable by the server only, and nothing gives it back: the commands and the GUI only say whether one is saved. Sending never holds up a print. See [notes/notifications.md](notes/notifications.md) for what each event says.
 
 ## Web page
 

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"tramline/internal/hue"
+	"tramline/internal/notify"
 	"tramline/internal/secure"
 	"tramline/internal/server"
 )
@@ -247,6 +248,27 @@ func (c *Client) HuePair() error {
 func (c *Client) HuePlugs() ([]hue.Light, error) {
 	var out []hue.Light
 	return out, c.do(http.MethodGet, "/v1/hue/plugs", nil, &out)
+}
+
+// Notify fetches the notification settings. The token never comes back, only whether
+// one is saved.
+func (c *Client) Notify() (notify.View, error) {
+	var out notify.View
+	return out, c.do(http.MethodGet, "/v1/notify", nil, &out)
+}
+
+// SetNotify changes the notification settings. Fields left nil stay as they are.
+func (c *Client) SetNotify(u notify.Update) (notify.View, error) {
+	var out notify.View
+	return out, c.do(http.MethodPut, "/v1/notify", u, &out)
+}
+
+// TestNotify has the server send a test notification now, and gives Switchboard's id.
+func (c *Client) TestNotify() (string, error) {
+	var out struct {
+		ID string `json:"id"`
+	}
+	return out.ID, c.do(http.MethodPost, "/v1/notify/test", nil, &out)
 }
 
 // File fetches what the server knows about one file, or returns ErrNotFound.

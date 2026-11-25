@@ -235,8 +235,16 @@ func (s *Server) findScheduleLocked(id int) *ScheduledPrint {
 	return nil
 }
 
-// endScheduleLocked records how it ended, and drops the oldest ended ones.
+// endScheduleLocked records how it ended, and drops the oldest ended ones. It sends a
+// notification, as nothing else will say it ended.
 func (s *Server) endScheduleLocked(p *ScheduledPrint, state, why string) {
+	s.closeScheduleLocked(p, state, why)
+	s.notifyScheduleEnd(p)
+}
+
+// closeScheduleLocked is endScheduleLocked for a schedule ending with its print job, whose
+// own end has been reported.
+func (s *Server) closeScheduleLocked(p *ScheduledPrint, state, why string) {
 	now := s.now()
 	p.State, p.Reason, p.EndedAt = state, why, &now
 	log.Printf("schedule %d: %s, %s. %s", p.ID, p.Name, state, why)
@@ -313,13 +321,13 @@ func (s *Server) applyJobEnd(job *PrintJob) {
 		if why == "" {
 			why = "the tram check when scheduling didn't finish"
 		}
-		s.endScheduleLocked(p, job.State, why)
+		s.closeScheduleLocked(p, job.State, why)
 		return
 	}
 	if job.Check != nil {
 		p.FinalCheck = job.Check
 	}
-	s.endScheduleLocked(p, job.State, why)
+	s.closeScheduleLocked(p, job.State, why)
 }
 
 // handleSchedule checks tram now, as a normal print's preparation does, including
@@ -775,7 +783,9 @@ func (s *Server) autoOff(ctx context.Context, run int) {
 			return
 		}
 		if time.Now().After(deadline) {
-			done(fmt.Sprintf("left on: couldn't confirm the nozzle was below %.0f C within %s", CoolEnough, autoOffLimit))
+			why := fmt.Sprintf("left on: couldn't confirm the nozzle was below %.0f C within %s", CoolEnough, autoOffLimit)
+			done(why)
+			s.notifyProblem("Printer left on", fmt.Sprintf("the auto-off couldn't confirm the nozzle was below %.0f C within %d minutes, so the printer is still on", CoolEnough, int(autoOffLimit.Minutes())))
 			return
 		}
 		select {

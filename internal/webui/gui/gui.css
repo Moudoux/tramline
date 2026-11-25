@@ -310,7 +310,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .field > span { color: var(--muted); font-size: 12px; }
 .field em { position: absolute; right: 10px; bottom: 8px; color: var(--muted); font-style: normal; font-size: 12px; pointer-events: none; }
 
-input[type="number"], input[type="datetime-local"], select {
+input[type="number"], input[type="datetime-local"], input[type="url"], input[type="password"], select {
   width: 100%;
   padding: 7px 10px;
   background: var(--field);
@@ -624,6 +624,15 @@ dialog .fields { margin-bottom: 14px; }
 }
 
 .confirm input { margin-top: 3px; accent-color: var(--accent); width: 16px; height: 16px; }
+
+.toggle { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.toggle input, .checks input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; flex: none; }
+.checks { margin: 0; padding: 0; border: 0; display: grid; gap: 8px; }
+.checks legend { margin-bottom: 6px; padding: 0; color: var(--muted); font-size: 12px; }
+.checks label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.checks label input { margin-top: 2px; }
+.checks span { display: flex; flex-direction: column; }
+.checks small { color: var(--muted); font-size: 12px; }
 
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 ul.plain { margin: 0 0 12px; padding-left: 18px; }

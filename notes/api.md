@@ -34,6 +34,9 @@ Port `8726` is proposed, which spells TRAM on a phone keypad. Not currently in u
 | `tramline schedule list [--json]`, `tramline schedule cancel <id>` | `GET /v1/schedule`, `POST /v1/schedule/<id>/cancel` | List them, or cancel one that hasn't started printing. Built, simulator only |
 | `tramline hue pair` | `POST /v1/hue/pair` | Pair after the bridge's button is pressed |
 | `tramline hue plugs` | `GET /v1/hue/plugs` | List names and UUIDs, for filling in the config |
+| `tramline notify [--json]` | `GET /v1/notify` | Notification settings, whether a token is saved (never the token), the events, and the last send. Built 2026-11-25, simulator and a fake Switchboard only, see Notifications |
+| `tramline notify set`, `notify token`, `notify on\|off` | `PUT /v1/notify` | Change any of `enabled`, `url`, `link`, `events` and `token`; a field left out stays, an empty token removes it. Unknown fields are refused |
+| `tramline notify test` | `POST /v1/notify/test` | Send a test now, even while off, and answer with Switchboard's id or why it failed |
 | `tramline update <binary>` | `PUT /v1/update` | Replace the server binary |
 | none, the GUI | `GET /v1/events` | `GET /v1/status` without the plug, as server-sent events, within 200 ms of a change and at least once a second. The read-only page has `/api/events` the same way. Built 2026-11-21, simulator only, see Status streams under Web page |
 
