@@ -2,8 +2,12 @@
 # It runs build.sh, so CI uses the same pinned Go container, the same
 # checks (stdlib only, gofmt, vet) and the same tests as a local build.
 #
-# Pushing a tag like v1.2.3 also publishes a GitHub Release with the binaries
-# and SHA256SUMS, stamped with the tag as the version.
+# Releasing is automatic: a push to main whose VERSION has no tag v<VERSION>
+# yet is built as that version, with the Pi's .deb, and once it passes, a
+# GitHub Release v<VERSION> is published with the binaries, the .deb and
+# SHA256SUMS, which creates the tag. So a release is: bump VERSION and the
+# PKGBUILD's pkgver, commit, push. Pushing a tag v<VERSION> by hand still
+# releases too, if that version hasn't been released.
 name: tramline
 
 on:
@@ -18,31 +22,79 @@ permissions:
 
 concurrency:
   group: tramline-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  # A release run is left to finish, so a version is never half published.
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Check, test and build
+      - name: Decide the version
+        id: version
         env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
         run: |
-          if [ "$REF_TYPE" = tag ]; then
-            export TRAMLINE_VERSION="$REF_NAME"
-          else
-            export TRAMLINE_VERSION="ci-${SHA:0:12}"
+          version=$(cat VERSION)
+          pkgver=$(sed -n 's/^pkgver=//p' packaging/arch/PKGBUILD)
+          if [ "$pkgver" != "$version" ]; then
+            echo "::error::the PKGBUILD's pkgver is $pkgver but VERSION is $version"
+            exit 1
           fi
-          ./build.sh
+          release=false
+          if [ "$REF_TYPE" = tag ]; then
+            if [ "$REF_NAME" != "v$version" ]; then
+              echo "::error::tag $REF_NAME doesn't match VERSION $version"
+              exit 1
+            fi
+            release=true
+          elif [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
+            # The repository is public, so this needs no credentials.
+            if ! git ls-remote --exit-code --tags "https://github.com/$REPO" "refs/tags/v$version" >/dev/null; then
+              release=true
+            fi
+          fi
+          # Release builds carry the plain version, as the .deb and the PKGBUILD do.
+          if [ "$release" = true ]; then
+            echo "Releasing v$version"
+            build_version=$version
+          else
+            build_version="ci-${SHA:0:12}"
+          fi
+          {
+            echo "release=$release"
+            echo "version=$version"
+            echo "build_version=$build_version"
+          } >>"$GITHUB_OUTPUT"
 
-      - name: Upload binaries
+      - name: Check, test and build
+        env:
+          TRAMLINE_VERSION: ${{ steps.version.outputs.build_version }}
+        run: ./build.sh
+
+      - name: Build the Pi's .deb
+        if: steps.version.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          packaging/build-deb.sh
+          cd dist
+          sha256sum "tramline_${VERSION}_arm64.deb" >>SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload the build
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tramline-${{ github.sha }}
@@ -50,12 +102,13 @@ jobs:
             dist/tramline-linux-arm64
             dist/tramline-linux-amd64
             dist/tramline-darwin-arm64
+            dist/tramline_${{ steps.version.outputs.version }}_arm64.deb
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 30
 
   release:
-    if: github.ref_type == 'tag'
+    if: needs.build.outputs.release == 'true'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -71,9 +124,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: v${{ needs.build.outputs.version }}
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA: ${{ github.sha }}
         run: |
           cd dist
           sha256sum -c SHA256SUMS
-          gh release create "$TAG" --verify-tag --title "Tramline $TAG" --generate-notes \
-            tramline-linux-arm64 tramline-linux-amd64 tramline-darwin-arm64 SHA256SUMS
+          deb="tramline_${VERSION}_arm64.deb"
+          [ -f "$deb" ] || { echo "::error::no $deb in the build"; exit 1; }
+          # A tag pushed by hand already exists; otherwise the release creates it at
+          # this commit. A tag made with this token starts no new run.
+          gh release create "$TAG" --target "$SHA" --title "Tramline $TAG" --generate-notes \
+            tramline-linux-arm64 tramline-linux-amd64 tramline-darwin-arm64 "$deb" SHA256SUMS
+          {
+            echo "### Released $TAG"
+            echo
+            echo "For arch-config's \`pi/\` tramline task:"
+            echo
+            echo '```'
+            grep "$deb" SHA256SUMS
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
